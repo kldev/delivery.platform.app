@@ -1,10 +1,21 @@
 # Delivery Platform
 
+| | |
+|---|---|
+| <img src="docs/screens/portal/01-overview.jpg" alt="Overview" /> | <img src="docs/screens/portal/02-deliveries.jpg" alt="Deliveries" /> |
+| **Overview**: orders at each stop of the route, payments waiting, discrepancies. | **Deliveries**: every order with its route line, stage, distance and price. |
+| <img src="docs/screens/portal/07-in-transit.jpg" alt="Delivery in transit" /> | <img src="docs/screens/portal/09-reconciled.jpg" alt="Delivery reconciled" /> |
+| **One delivery** on its way: paid, a driver assigned, picked up. | **The same delivery** delivered, settled and reconciled. |
+| <img src="docs/screens/portal/10-settlement-of-the-delivery.jpg" alt="Settlement of the delivery" /> | <img src="docs/screens/portal/12-reconciliation-of-the-delivery.jpg" alt="Reconciliation of the delivery" /> |
+| **Settlement**: the driver's share of the delivery, with base and the night, weekend and distance additions. | **Reconciliation**: the amount from the payment provider checked against the delivery price. |
+
+The full tour, with diagrams of the flows: **[`docs/Portal.md`](docs/Portal.md)**.
+
+---
+
 Event-driven microservices platform for managing deliveries, payments, external transactions and financial reconciliation.
 
 The project demonstrates a distributed architecture built around **Kotlin (JVM 25), Spring Boot, Quarkus, C#, ASP.NET Core, YARP, Blazor, PostgreSQL and Apache Kafka**.
-
-The operations portal in screenshots, with diagrams of the flows: **[`docs/Portal.md`](docs/Portal.md)** (screens in [`docs/screens/portal/`](docs/screens/portal/)).
 
 The main goal of the project is to demonstrate how independent microservices can cooperate through REST APIs and asynchronous Kafka events while maintaining clear domain boundaries.
 
