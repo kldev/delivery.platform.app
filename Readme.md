@@ -2,7 +2,9 @@
 
 Event-driven microservices platform for managing deliveries, payments, external transactions and financial reconciliation.
 
-The project demonstrates a distributed architecture built around **Kotlin, Java 25, Spring Boot, C#, ASP.NET Core, YARP, PostgreSQL and Apache Kafka**.
+The project demonstrates a distributed architecture built around **Kotlin (JVM 25), Spring Boot, Quarkus, C#, ASP.NET Core, YARP, Blazor, PostgreSQL and Apache Kafka**.
+
+The operations portal in screenshots, with diagrams of the flows: **[`docs/Portal.md`](docs/Portal.md)** (screens in [`docs/screens/portal/`](docs/screens/portal/)).
 
 The main goal of the project is to demonstrate how independent microservices can cooperate through REST APIs and asynchronous Kafka events while maintaining clear domain boundaries.
 
@@ -41,26 +43,16 @@ The platform consists of several independent services:
                          ┌────────────────────────────────────┐
                          │             Kafka                  │
                          │        Event Backbone              │
-                         └──────┬──────┬──────┬──────┬────┬───┘
-                                ▲      ▲      ▲      ▲    ▲
-                                │      │      │      │    │
-                         ┌──────┴──┐ ┌─┴─────┐ ┌┴──────┐ ┌┴──────────┐
-                         │Delivery │ │Payment│ │Ledger │ │Settlement │
-                         │ Events  │ │Events │ │Events │ │  Events   │
-                         └─────────┘ └───────┘ └───────┘ └───────────┘
-                                │      │      │      │
-                                └──────┴──────┴──────┴─────────┐
-                                                               │
-                                                               ▼
-                                                    ┌─────────────────────┐
-                                                    │  Reconciliation     │
-                                                    │      Service        │
-                                                    │       Kotlin        │
-                                                    │     Spring Boot     │
-                                                    └──────────┬──────────┘
-                                                               │
-                                                               ▼
-                                                        PostgreSQL
+                         └────────────────────────────────────┘
+
+  Delivery ── delivery.confirmed ──► Payment ── payment.paid / payment.declined ──► Delivery
+  Delivery ── delivery.completed ──► Settlement ── driver.settlement.completed ──► Ledger
+                                     Settlement ── settlement.created ──────────► Reconciliation
+  Payment  ── payment.completed (external transaction) ─────────────────────────► Reconciliation
+  delivery / payment / settlement / driver topics ─────────────────────────────► Notification
+
+ Also behind the gateway: Notification Service and Reporting Service (Kotlin, Quarkus).
+ In front of the gateway: Operations Portal (Blazor, .NET).
 ```
 
 Each service owns its domain and persistence model.
@@ -95,11 +87,15 @@ ASSIGNED
 PICKED_UP
    │
    ▼
-IN_PROGRESS
+IN_TRANSIT
    │
    ▼
 DELIVERED
 ```
+
+`CANCELLED` ends the route: by `/cancel` from CREATED, ASSIGNED, PICKED_UP or IN_TRANSIT, or from CONFIRMED when the
+payment is declined (`payment.declined`). ASSIGNED is set automatically when `payment.paid` arrives (a free driver is
+picked), or by hand with `/assign-driver`.
 
 The service manages:
 
@@ -117,7 +113,9 @@ The service manages:
 
 Responsible for payment lifecycle and external transactions.
 
-A payment can be accepted and later completed using an external transaction reported by a payment provider.
+A payment is created from `delivery.confirmed` as `Pending`, then accepted (`Paid`, publishes `payment.paid`) or
+declined (`Failed`, publishes `payment.declined`). An external transaction reported by a payment provider is stored
+and publishes `payment.completed`.
 
 Example external transaction:
 
@@ -136,7 +134,8 @@ The payment service stores external transactions and publishes events used by th
 
 ###  Ledger Service
 
-The Ledger Service provides financial ledger entries related to completed payments and deliveries.
+The Ledger Service posts double-entry transactions (platform debited, driver credited) from driver settlements
+(`driver.settlement.completed`).
 
 It can be queried independently from the Payment and Delivery services.
 
@@ -147,21 +146,19 @@ It can be queried independently from the Payment and Delivery services.
 The Reconciliation Service compares:
 
 ```text
-Expected Amount
-       │
-       │
-       ▼
-External Transaction
+Expected Amount  = delivery price, from the settlement      (settlement.created)
        │
        ▼
-Actual Amount
+Actual Amount    = external transaction of the provider     (payment.completed)
 ```
 
 and determines whether the payment is correctly settled.
 
-Possible reconciliation states include:
+Reconciliation states:
+- PENDING - only one side is known yet
 - RECONCILED
 - DISCREPANCY
+- MISSING_PAYMENT, MISSING_SETTLEMENT - defined, not set by any flow yet
 
 Example of a successful reconciliation:
 
@@ -201,12 +198,12 @@ Create Delivery
       ▼
 Confirm Delivery
       │
-      │
-      └──────────────► Payment created asynchronously
+      │ delivery.confirmed
+      └──────────────► Payment created asynchronously (Pending)
                               │
                               ▼
                        Accept Payment
-                              │
+                              │ payment.paid
                               ▼
                        Delivery Assigned
                               │
@@ -218,15 +215,14 @@ Confirm Delivery
                               │
                               ▼
                     Complete Delivery
-                              │
+                              │ delivery.completed
                               ▼
-                         Ledger Entry
+                     Driver Settlement ─── driver.settlement.completed ──► Ledger Entry
                               │
-                              ▼
-                 External Transaction
-                              │
-                              ▼
-                       Reconciliation
+                              │ settlement.created            External Transaction
+                              │                                       │ payment.completed
+                              ▼                                       │
+                       Reconciliation ◄───────────────────────────────┘
                               │
                  ┌────────────┴────────────┐
                  ▼                         ▼
@@ -240,19 +236,19 @@ For example:
 ```text
 Delivery Service
       │
-      │ DeliveryConfirmed
+      │ delivery.confirmed
       ▼
      Kafka
       │
       ▼
 Payment Service
       │
-      │ PaymentCreated
+      │ payment.paid (after acceptance)
       ▼
      Kafka
       │
       ▼
-other consumers
+Delivery Service (assigns a driver), Notification Service
 ```
 
 This allows individual services to remain independently deployable and scalable.
@@ -262,15 +258,12 @@ This allows individual services to remain independently deployable and scalable.
 ### Technology Stack
 
 Backend
-- Kotlin
-- Java 25
-- Spring Boot
-- Spring Data / JPA
-- C#
-- .NET
-- ASP.NET Core
+- Kotlin on JVM 25
+- Spring Boot, Spring Data / JPA (delivery, settlement, ledger, reconciliation)
+- Quarkus: Mutiny and the reactive PostgreSQL client (notification), REST and REST client (reporting)
+- C#, .NET, ASP.NET Core, EF Core (payment), YARP (gateway), Blazor (portal)
 
-Kotlin and Java are used for Spring Boot based services, while the Payment service and gateway demonstrate the .NET/C# side of the platform.
+All JVM services are written in Kotlin, while the Payment service, the gateway and the portal demonstrate the .NET/C# side of the platform.
 
 ---
 
@@ -285,9 +278,14 @@ Example:
 ```text
 /api/delivery/*       → Delivery Service
 /api/payment/*        → Payment Service
+/api/settlement/*     → Settlement Service
 /api/ledger/*         → Ledger Service
 /api/reconciliation/* → Reconciliation Service
+/api/notification/*   → Notification Service
+/api/reporting/*      → Reporting Service
 ```
+
+Each route strips its prefix and adds `/api`: `/api/delivery/deliveries` becomes `/api/deliveries` on the delivery service.
 This gives clients a single entry point while keeping services internally independent.
 
 ---
@@ -298,6 +296,7 @@ This gives clients a single entry point while keeping services internally indepe
 route, drivers, payments, settlements, ledger, reconciliations and notifications. It calls the services only through
 the gateway, with C# clients that Kiota generates from the gateway's OpenAPI documents. In compose it runs at
 http://localhost:5080 (`docker compose up -d portal`). Details: [dotnet/App.Platform.Portal/README.md](dotnet/App.Platform.Portal/README.md).
+A tour in screenshots, taken by its Playwright e2e tests: [docs/Portal.md](docs/Portal.md).
 
 ---
 
@@ -310,14 +309,16 @@ Kafka is responsible for asynchronous communication between services.
 Typical events include concepts such as:
 
 ```text
-DeliveryConfirmed
-PaymentCreated
-PaymentAccepted
-DeliveryAssigned
-DeliveryCompleted
-ExternalTransactionReceived
-PaymentReconciled
+delivery.created, delivery.confirmed, delivery.assigned, delivery.picked_up,
+delivery.started, delivery.completed, delivery.cancelled
+payment.paid, payment.declined, payment.completed
+settlement.created, driver.settlement.completed
 ```
+
+Topics (`infrastructure/kafka/init-topics.sh`): the events other services consume have their own topic
+(`delivery.confirmed`, `delivery.completed`, `payment.paid`, `payment.declined`, `payment.completed`,
+`settlement.created`, `driver.settlement.completed`); the rest go to `delivery.events`, `payment.events` and
+`settlement.events`. Failed events of notification, reconciliation and settlement go to `<service>.dlq`.
 
 The exact event contracts are owned by the corresponding domains.
 
@@ -335,7 +336,8 @@ This allows the services to evolve their schemas independently.
 
 ### API Documentation
 
-The APIs are documented using **OpenAPI** and exposed through **Scalar**.
+The APIs are documented using **OpenAPI** and exposed through **Scalar**: the gateway aggregates the documents of all
+services at http://localhost:5000/docs.
 
 Scalar provides an interactive API documentation experience for testing and exploring the REST endpoints.
 
@@ -354,10 +356,16 @@ POST   /api/delivery/drivers
 GET    /api/delivery/deliveries
 POST   /api/delivery/deliveries
 
-PUT    /api/delivery/deliveries/{id}/confirm
-PUT    /api/delivery/deliveries/{id}/pickup
-PUT    /api/delivery/deliveries/{id}/start
-PUT    /api/delivery/deliveries/{id}/complete
+GET    /api/delivery/deliveries/{id}
+GET    /api/delivery/deliveries/status-durations
+GET    /api/delivery/drivers/{id}
+
+POST   /api/delivery/deliveries/{id}/confirm
+POST   /api/delivery/deliveries/{id}/assign-driver
+POST   /api/delivery/deliveries/{id}/pickup
+POST   /api/delivery/deliveries/{id}/start
+POST   /api/delivery/deliveries/{id}/complete
+POST   /api/delivery/deliveries/{id}/cancel
 ```
 
 #### Payment
@@ -365,20 +373,41 @@ PUT    /api/delivery/deliveries/{id}/complete
 ```http
 GET  /api/payment/payments
 PUT  /api/payment/payments/{id}/accept
+PUT  /api/payment/payments/{id}/decline
 
+GET  /api/payment/payments/external
 POST /api/payment/payments/external
 ```
 
 #### Ledger
 
 ```http
+GET /api/ledger/ledger-accounts
+GET /api/ledger/ledger-accounts/{id}
 GET /api/ledger/ledger-entries
+GET /api/ledger/ledger-transactions
 ```
 
 #### Reconciliation
 
-```
+```http
 GET /api/reconciliation/reconciliations
+GET /api/reconciliation/reconciliations/{id}
+```
+
+#### Settlement
+
+```http
+GET /api/settlement/settlements
+GET /api/settlement/settlements/{id}
+```
+
+#### Notification
+
+```http
+GET  /api/notification/notifications
+GET  /api/notification/notifications/{id}
+POST /api/notification/notifications
 ```
 
 ---
@@ -455,11 +484,11 @@ Start
       ↓
 Complete
       ↓
-Wait for Ledger
+Get Ledger Entries
       ↓
 Submit External Transaction
       ↓
-Wait for Reconciliation
+Get Reconciliations
 ```
 
 The current scenario uses:
@@ -480,8 +509,8 @@ The test also verifies asynchronous processing by polling for:
 - payment creation
 - delivery assignment
 - delivery completion
-- ledger entries
-- reconciliation results
+
+Ledger entries and reconciliations are read once, with a check of the HTTP status only.
 
 ---
 
@@ -495,27 +524,19 @@ amount: Math.random() < 0.5
     : 9.000
 ```
 
-This produces two reconciliation scenarios.
-
-**Successful settlement**
-
-```text
-Expected = 7 PLN
-Actual   = 7 PLN
-           ↓
-       RECONCILED
-```
-
-**Payment discrepancy**
+The expected amount is the delivery price, which the delivery service sets from the distance (up to 10 km: 5,
+up to 50 km: 10, up to 100 km: 20, more: 50). k6 uses 20-120 km and a random currency (PLN, EUR or GBP), so the price
+is 10, 20 or 50 and every k6 flow currently ends in a discrepancy:
 
 ```text
-Expected = 7 PLN
-Actual   = 9 PLN
+Expected = 10 / 20 / 50
+Actual   = 7 or 9
            ↓
        DISCREPANCY
 ```
 
-This allows the load test to validate not only HTTP availability, but also actual business behavior across multiple services.
+A matching amount (RECONCILED) is covered by the portal's e2e test, which sends the payment's own amount
+([docs/Portal.md](docs/Portal.md#one-deliverys-route)).
 
 ---
 
@@ -543,8 +564,17 @@ The project combines several levels of testing:
                  ┌────────▼─────────┐
                  │   k6 E2E Load    │
                  │      Tests       │
+                 └────────┬─────────┘
+                          │
+                 ┌────────▼─────────┐
+                 │ Portal E2E       │
+                 │ (Playwright)     │
                  └──────────────────┘
 ```
+
+The Kafka / event tests exercise the listeners and the JSON contracts without a broker. Konsist architecture tests
+check the layering of the Kotlin services. The portal's Playwright tests click through the running stack and produce the
+screenshots of [docs/Portal.md](docs/Portal.md).
 
 The k6 test is particularly useful for validating the complete distributed flow rather than testing individual endpoints in isolation.
 
@@ -557,11 +587,16 @@ The platform is designed to run locally using Docker Compose.
 Infrastructure includes:
 
 ```text
-PostgreSQL
-Kafka
-Kafka UI
-Microservices
-YARP Gateway
+PostgreSQL     localhost:5632
+Kafka          localhost:9092
+Kafka UI       http://localhost:8080
+Microservices  delivery, payment, settlement, ledger, reconciliation, notification, reporting
+YARP Gateway   http://localhost:5000  (Scalar: /docs)
+Portal         http://localhost:5080
+```
+
+```bash
+docker compose up -d --build
 ```
 
 After starting the environment, the gateway can be used as the main entry point for API requests.
@@ -603,10 +638,10 @@ The client/test therefore waits until the corresponding asynchronous event has b
 Confirm Delivery
       │
       ▼
-   Kafka
+   Kafka (delivery.confirmed)
       │
       ▼
-Payment Created
+Payment Created (no event - the client polls GET /payments)
 ```
 
 **Distributed workflow**
@@ -614,13 +649,13 @@ Payment Created
 Completing a delivery triggers additional processing in other services.
 
 ```text
-Delivery
+Delivery (delivery.completed)
    │
-   ├──► Payment
-   │
-   ├──► Ledger
-   │
-   └──► Reconciliation
+   └──► Settlement
+           │
+           ├──► Ledger          (driver.settlement.completed)
+           │
+           └──► Reconciliation  (settlement.created)
 ```
 
 ## Outbox Pattern
@@ -876,25 +911,23 @@ ProducerRecord
 Kafka
 ```
 
-The event is published together with metadata stored in Kafka headers:
+The record key is the `aggregateId`. The event carries its metadata in the JSON payload, and the version in a Kafka
+header:
 
 ```text
-event-id
-event-type
-event-version
-occurred-at
+header   event-version: 1
+payload  eventId, eventType, aggregateId, module, occurredAt, ...
 ```
 
 For example:
 
 ```text
-event-id:       8d7...
-event-type:     PaymentCompleted
-event-version:  1
-occurred-at:    2026-08-24T16:30:00Z
+eventId:     8d7...
+eventType:   payment.completed
+occurredAt:  2026-08-24T16:30:00Z
 ```
 
-The `event-id` allows consumers to uniquely identify a particular event and can be used for idempotency and deduplication.
+The `eventId` allows consumers to uniquely identify a particular event and can be used for idempotency and deduplication.
 
 ---
 
@@ -915,12 +948,15 @@ The publisher uses exponential backoff with a maximum delay.
 The current implementation starts with a 5-second base delay:
 
 ```text
-attempt 1 → 10 seconds
-attempt 2 → 20 seconds
-attempt 3 → 40 seconds
+failure 1 → retry after 10 seconds
+failure 2 → retry after 20 seconds
+failure 3 → DEAD (MAX_ATTEMPTS = 3)
 ```
 
-The delay is capped by `MAX_BACKOFF_SECONDS`.
+The delay is capped by `MAX_BACKOFF_SECONDS` (300).
+
+This is the Kotlin outbox of the delivery and settlement services. The Payment service (C#) has an equivalent
+`BackgroundService`: batch 100, a 30 s lease, `2^attempts` seconds of backoff capped at 60 s, 3 attempts.
 
 This prevents the application from continuously retrying failed Kafka operations in a tight loop.
 
@@ -988,7 +1024,7 @@ The publisher first claims a batch and then processes each message independently
       Kafka        Kafka        Kafka
         │            │            │
         ▼            ▼            ▼
-   PUBLISHED     PUBLISHED      FAILED
+   PUBLISHED     PUBLISHED   PENDING (retry later)
 ```
 
 ---
@@ -1235,7 +1271,7 @@ The **Notification Service** is responsible for delivering user-facing notificat
 * Support notification payloads containing a `deliveryId`.
 * Persist notifications for reliable processing.
 * Process pending notifications asynchronously.
-* Send notifications through the appropriate channel, such as email.
+* Send notifications through the appropriate channel: EMAIL, SMS or PUSH (the senders are stubs that log for now).
 * Handle failures without blocking the originating business process.
 
 ## Architecture
@@ -1295,13 +1331,10 @@ The application does not dedicate a worker thread to waiting for a database resp
 For example:
 
 ```kotlin
-fun findPendingNotifications(limit: Int): Multi<Notification> =
-    client.preparedQuery(FIND_PENDING)
-        .execute(Tuple.of(limit))
-        .onItem()
-        .transformToMulti { rows ->
-            Multi.createFrom().iterable(rows.map(::toNotification))
-        }
+// PgNotificationQueue: claims a batch for sending in one statement
+// (UPDATE notifications SET status = 'PROCESSING', attempts = attempts + 1 ... FOR UPDATE SKIP LOCKED),
+// also reclaiming PROCESSING rows whose lease has expired.
+fun claim(batchSize: Int, lease: Duration): Uni<List<Notification>>
 ```
 
 This approach is particularly useful for the notification processing workload because many operations are I/O-bound:
@@ -1344,6 +1377,8 @@ Pool configuration can be tuned according to the expected workload, for example:
 quarkus.datasource.reactive.max-size=20
 quarkus.datasource.reactive.idle-timeout=60S
 ```
+
+These two are not set in the project yet, so Quarkus defaults apply.
 
 The pool size should not be treated as a simple "more is better" setting. It should be chosen according to PostgreSQL capacity, application concurrency and the expected number of concurrent database operations.
 
@@ -1402,10 +1437,10 @@ Reactive transactions are especially important here because using a traditional 
 1. A business service publishes an event to Kafka.
 2. The Notification Service consumes the event.
 3. The notification handler determines whether a recipient is already present.
-4. If the recipient is missing, the service attempts to resolve it from the event context.
-5. For events containing a `deliveryId`, the service can resolve the associated driver and obtain the driver's contact information.
-6. A notification is persisted with a `PENDING` status.
-7. A scheduler periodically retrieves pending notifications using reactive database queries.
+4. A notification is persisted with a `PENDING` status, one per channel (EMAIL, SMS, PUSH by event type); the recipient may still be empty.
+5. A scheduler periodically claims pending notifications using reactive database queries.
+6. If the recipient is missing, the service resolves it at send time: for events containing a `deliveryId`, it asks the delivery service (REST) for the driver and the driver's contact information.
+7. A notification whose recipient cannot be resolved fails after the retries (e.g. `payment.declined` of a delivery that never had a driver).
 8. The notification is delivered through the configured channel.
 9. The notification status is updated to reflect the result of the delivery.
 
@@ -1418,25 +1453,22 @@ Domain Event
      ▼
 Create Notification
      │
+     ▼
+Persist PENDING
+     │
+     ▼
+Scheduler (claim batch)
+     │
      ├── recipient exists ───────┐
      │                           │
      └── deliveryId exists       │
               │                  │
               ▼                  │
-       Resolve Driver            │
+       Resolve Driver (REST)     │
               │                  │
               └──────────┬───────┘
                          ▼
-                  Persist PENDING
-                         │
-                         ▼
-                    Scheduler
-                         │
-                         ▼
-              Reactive PostgreSQL
-                         │
-                         ▼
-                   Email Client
+          Sender (EMAIL / SMS / PUSH)
                          │
                   ┌──────┴──────┐
                   ▼             ▼
@@ -1476,7 +1508,8 @@ Typical lifecycle:
 
 ```text
 PENDING → PROCESSING → SENT
-                    └→ FAILED
+              │
+              └→ PENDING (retry) ... after 5 attempts → FAILED
 ```
 
 The persisted state allows the scheduler to safely resume processing after service restarts or temporary infrastructure failures.

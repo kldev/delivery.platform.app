@@ -39,6 +39,7 @@ src/App.Platform.Portal.ApiClients/    Kiota output - never edited by hand
   prepare_spec.py                      adjustments before Kiota (see its docstring)
   generate.sh                          fetch + regenerate
 tests/App.Platform.Portal.Tests        xUnit v3: lifecycle, trail, error texts, /health
+tests/App.Platform.Portal.E2E          Playwright against the running stack; screenshots of docs/Portal.md
 ```
 
 ## Run
@@ -81,7 +82,9 @@ Commit `openapi/*.json` and `Generated/` together. Kiota is a local tool (`.conf
 
 ```bash
 dotnet build
-dotnet test
+dotnet test --project tests/App.Platform.Portal.Tests
+dotnet test --project tests/App.Platform.Portal.E2E   # needs the stack: docker compose up -d --build
+../../scripts/screens.sh                                # the e2e run that rewrites docs/screens/portal/
 dotnet csharpier check .
 docker build -t app-platform-portal:dev .
 ```

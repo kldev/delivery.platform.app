@@ -4,6 +4,7 @@
     <Project Path="src/App.Platform.Portal/App.Platform.Portal.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/App.Platform.Portal.E2E/App.Platform.Portal.E2E.csproj" />
     <Project Path="tests/App.Platform.Portal.Tests/App.Platform.Portal.Tests.csproj" />
   </Folder>
 </Solution>

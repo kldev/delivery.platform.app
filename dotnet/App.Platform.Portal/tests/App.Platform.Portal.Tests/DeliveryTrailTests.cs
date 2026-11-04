@@ -164,4 +164,13 @@ public class DeliveryTrailTests
             )
             .ShouldBe(TrailState.Failed);
     }
+
+    [Fact]
+    public void After_a_declined_payment_the_page_waits_for_the_delivery_service_to_cancel()
+    {
+        var facts = Facts(DeliveryStage.Confirmed, payment: "Failed");
+
+        StateOf(facts, TrailStepKind.Driver).ShouldBe(TrailState.Waiting);
+        DeliveryTrail.AwaitsServices(DeliveryTrail.Build(facts)).ShouldBeTrue();
+    }
 }

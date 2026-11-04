@@ -165,6 +165,16 @@ public static class DeliveryTrail
                     notApplicable,
                     "user-check"
                 );
+            // payment.declined: the delivery service cancels the delivery - keep asking until it has.
+            if (facts.PaymentStatus == "Failed" && facts.Stage == DeliveryStage.Confirmed)
+                return new(
+                    TrailStepKind.Driver,
+                    title,
+                    service,
+                    TrailState.Waiting,
+                    "Płatność odrzucona - serwis dostaw anuluje dostawę.",
+                    "user-check"
+                );
             if (paid && facts.Stage == DeliveryStage.Confirmed)
                 return new(
                     TrailStepKind.Driver,
