@@ -1,0 +1,25 @@
+@if (Message is not null)
+{
+    <div class="notice" role="alert">
+        <Icon Name="plug" />
+        <div class="notice-text">
+            <strong>@Title</strong>
+            <p>@Message</p>
+        </div>
+        @if (OnRetry.HasDelegate)
+        {
+            <button type="button" class="btn btn-sm" @onclick="OnRetry"><Icon Name="refresh" />Spróbuj ponownie</button>
+        }
+    </div>
+}
+
+@code {
+    [Parameter]
+    public string? Message { get; set; }
+
+    [Parameter]
+    public string Title { get; set; } = "Nie udało się pobrać danych";
+
+    [Parameter]
+    public EventCallback OnRetry { get; set; }
+}

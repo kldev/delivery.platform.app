@@ -1,0 +1,20 @@
+@switch (Status)
+{
+    case "Paid":
+        <Pill Text="Opłacona" Tone="route" IconName="circle-check" />
+        break;
+    case "Failed":
+        <Pill Text="Odrzucona" Tone="stop" IconName="circle-x" />
+        break;
+    case "Pending":
+        <Pill Text="Czeka na decyzję" Tone="signal" IconName="hourglass" />
+        break;
+    default:
+        <Pill Text="@(Status ?? "-")" />
+        break;
+}
+
+@code {
+    [Parameter]
+    public string? Status { get; set; }
+}

@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/App.Platform.Portal.ApiClients/App.Platform.Portal.ApiClients.csproj" />
+    <Project Path="src/App.Platform.Portal/App.Platform.Portal.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/App.Platform.Portal.Tests/App.Platform.Portal.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,43 @@
+@implements IDisposable
+@inject Toasts Toasts
+
+<div class="toasts" aria-live="polite">
+    @foreach (var toast in Toasts.Items)
+    {
+        <div class="toast @(toast.IsError ? "error" : "")" @key="toast.Id">
+            <span class="toast-icon"><Icon Name="@(toast.IsError ? "alert" : "circle-check")" /></span>
+            <div class="toast-text">
+                <strong>@toast.Title</strong>
+                @if (toast.Text is not null)
+                {
+                    <div class="toast-sub">@toast.Text</div>
+                }
+            </div>
+            <button type="button" @onclick="() => Toasts.Dismiss(toast.Id)" aria-label="Zamknij"><Icon Name="x" /></button>
+        </div>
+    }
+</div>
+
+@code {
+    private static readonly TimeSpan ShownFor = TimeSpan.FromSeconds(5);
+
+    protected override void OnInitialized() => Toasts.Changed += OnChanged;
+
+    private readonly HashSet<Guid> _timed = [];
+
+    private void OnChanged()
+    {
+        foreach (var toast in Toasts.Items)
+            if (_timed.Add(toast.Id))
+                _ = DismissLater(toast.Id);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task DismissLater(Guid id)
+    {
+        await Task.Delay(ShownFor);
+        await InvokeAsync(() => Toasts.Dismiss(id));
+    }
+
+    public void Dispose() => Toasts.Changed -= OnChanged;
+}

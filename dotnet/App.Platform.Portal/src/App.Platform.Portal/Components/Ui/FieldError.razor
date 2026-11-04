@@ -1,0 +1,9 @@
+@if (Message is not null)
+{
+    <span class="error"><Icon Name="alert" />@Message</span>
+}
+
+@code {
+    [Parameter]
+    public string? Message { get; set; }
+}

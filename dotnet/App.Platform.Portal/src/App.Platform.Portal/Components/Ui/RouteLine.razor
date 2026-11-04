@@ -1,0 +1,79 @@
+@* A delivery's lifecycle drawn as a transit line: stops are statuses, the vehicle glides to the next stop when the
+   status changes (the width/left transitions in app.css). Cancelled stops the line, dashed red, where it was. *@
+<ol class="route @Variant @(IsCancelled ? "cancelled" : "")" style="--progress:@ProgressText"
+    aria-label="Przebieg dostawy: @DeliveryStages.Label(Stage)">
+    <li class="route-travelled" aria-hidden="true"></li>
+    @if (Variant == "big")
+    {
+        <li class="vehicle" aria-hidden="true"><Icon Name="@(IsCancelled ? "ban" : "truck")" /></li>
+    }
+    @foreach (var stop in DeliveryStages.Route)
+    {
+        var state = StateOf(stop);
+        if (StopHref is not null)
+        {
+            <li style="display:contents">
+                <a class="stop @state" href="@StopHref(stop)" title="@DeliveryStages.Label(stop)">
+                    <span class="dot"></span>
+                    @if (Counts is not null)
+                    {
+                        <span class="stop-count">@(Counts.TryGetValue(stop, out var count) ? count : "-")</span>
+                    }
+                    <span class="stop-name">@DeliveryStages.Label(stop)</span>
+                </a>
+            </li>
+        }
+        else
+        {
+            <li class="stop @state" title="@DeliveryStages.Label(stop)" aria-current="@(state == "here" ? "step" : null)">
+                <span class="dot"></span>
+                @if (Variant != "mini")
+                {
+                    <span class="stop-name">@DeliveryStages.Label(stop)</span>
+                    @if (StopMeta?.Invoke(stop) is { } meta)
+                    {
+                        <span class="stop-meta">@meta</span>
+                    }
+                }
+            </li>
+        }
+    }
+</ol>
+
+@code {
+    [Parameter, EditorRequired]
+    public DeliveryStage Stage { get; set; }
+
+    /// <summary>For a cancelled delivery: the stop it was at when cancelled.</summary>
+    [Parameter]
+    public DeliveryStage? CancelledAt { get; set; }
+
+    /// <summary>"big" (delivery page), "mini" (table rows) or "" (overview).</summary>
+    [Parameter]
+    public string Variant { get; set; } = "";
+
+    [Parameter]
+    public IReadOnlyDictionary<DeliveryStage, string>? Counts { get; set; }
+
+    [Parameter]
+    public Func<DeliveryStage, string>? StopHref { get; set; }
+
+    [Parameter]
+    public Func<DeliveryStage, string?>? StopMeta { get; set; }
+
+    private bool IsCancelled => Stage == DeliveryStage.Cancelled;
+
+    private DeliveryStage Position => IsCancelled ? CancelledAt ?? DeliveryStage.Created : Stage;
+
+    private string ProgressText =>
+        (Counts is not null ? 1 : DeliveryStages.Progress(Position)).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private string StateOf(DeliveryStage stop)
+    {
+        if (Counts is not null)
+            return "passed";
+        var here = DeliveryStages.IndexOf(Position);
+        var index = DeliveryStages.IndexOf(stop);
+        return index < here ? "passed" : index == here ? (Stage == DeliveryStage.Delivered ? "passed here" : "here") : "ahead";
+    }
+}

@@ -1,0 +1,615 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Delivery ledger API (via Gateway)",
+    "version": "v0"
+  },
+  "paths": {
+    "/api/ledger/ledger-transactions": {
+      "get": {
+        "tags": [
+          "Ledger transactions"
+        ],
+        "summary": "List ledger transactions",
+        "description": "Newest first by occurredAt, each with its entries. `from` and `to` filter occurredAt by day\nin Europe/Warsaw, both inclusive.",
+        "operationId": "listLedgerTransactions",
+        "parameters": [
+          {
+            "name": "referenceId",
+            "in": "query",
+            "description": "Only transactions for this business object (e.g. settlement id)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "referenceType",
+            "in": "query",
+            "description": "Only transactions for this kind of business object, e.g. SETTLEMENT",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 50,
+              "minLength": 0
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "First day (yyyy-MM-dd)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Last day (yyyy-MM-dd)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Zero-based page number",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "description": "Page size, 1 to 500",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SliceResponseLedgerTransactionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation`, with `errors[]`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected error (`internal-error`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ledger/ledger-entries": {
+      "get": {
+        "tags": [
+          "Ledger entries"
+        ],
+        "summary": "List ledger entries",
+        "description": "Newest first. `from` and `to` are days in Europe/Warsaw, both inclusive.",
+        "operationId": "listLedgerEntries",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "query",
+            "description": "Only entries of this account",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "transactionId",
+            "in": "query",
+            "description": "Only entries of this transaction",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "First day (yyyy-MM-dd)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "Last day (yyyy-MM-dd)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Zero-based page number",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "description": "Page size, 1 to 500",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SliceResponseLedgerEntryResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation`, with `errors[]`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected error (`internal-error`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ledger/ledger-accounts": {
+      "get": {
+        "tags": [
+          "Ledger accounts"
+        ],
+        "summary": "List ledger accounts",
+        "description": "Oldest first, with their latest computed balance.",
+        "operationId": "listLedgerAccounts",
+        "parameters": [
+          {
+            "name": "ownerType",
+            "in": "query",
+            "description": "Only PLATFORM or DRIVER accounts",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PLATFORM",
+                "DRIVER"
+              ]
+            }
+          },
+          {
+            "name": "ownerId",
+            "in": "query",
+            "description": "Only accounts of this owner (driver id)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "currency",
+            "in": "query",
+            "description": "Only accounts in this currency (ISO 4217)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "[A-Z]{3}"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Zero-based page number",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 0,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "description": "Page size, 1 to 500",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SliceResponseLedgerAccountResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation`, with `errors[]`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected error (`internal-error`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ledger/ledger-accounts/{accountId}": {
+      "get": {
+        "tags": [
+          "Ledger accounts"
+        ],
+        "summary": "Get a ledger account",
+        "operationId": "getLedgerAccount",
+        "parameters": [
+          {
+            "name": "accountId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerAccountResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed (`validation`, with `errors[]`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (`*.not-found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected error (`internal-error`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "LedgerTransactionEntryResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "DEBIT",
+              "CREDIT"
+            ]
+          }
+        }
+      },
+      "LedgerTransactionResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "DRIVER_SETTLEMENT",
+              "DRIVER_PAYOUT",
+              "ADJUSTMENT"
+            ]
+          },
+          "referenceType": {
+            "type": "string"
+          },
+          "referenceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LedgerTransactionEntryResponse"
+            }
+          }
+        }
+      },
+      "SliceResponseLedgerTransactionResponse": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LedgerTransactionResponse"
+            }
+          },
+          "hasNext": {
+            "type": "boolean"
+          }
+        }
+      },
+      "LedgerEntryResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "transactionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "accountId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "amount": {
+            "type": "number"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "DEBIT",
+              "CREDIT"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SliceResponseLedgerEntryResponse": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LedgerEntryResponse"
+            }
+          },
+          "hasNext": {
+            "type": "boolean"
+          }
+        }
+      },
+      "LedgerAccountResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "ownerType": {
+            "type": "string",
+            "enum": [
+              "PLATFORM",
+              "DRIVER"
+            ]
+          },
+          "ownerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Driver id for DRIVER accounts, null for PLATFORM"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "balance": {
+            "type": "number",
+            "description": "Credits minus debits, up to date with every posted transaction"
+          },
+          "balanceUpdatedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "SliceResponseLedgerAccountResponse": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LedgerAccountResponse"
+            }
+          },
+          "hasNext": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ProblemDetail": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "instance": {
+            "type": "string",
+            "format": "uri"
+          },
+          "code": {
+            "type": "string",
+            "description": "Stable, machine-readable reason, e.g. delivery.not-found"
+          },
+          "errors": {
+            "type": "array",
+            "description": "Invalid fields of the request",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

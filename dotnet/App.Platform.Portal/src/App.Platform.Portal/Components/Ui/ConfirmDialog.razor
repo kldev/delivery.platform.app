@@ -1,0 +1,56 @@
+@* An in-page dialog (never the browser's confirm(), which blocks the circuit). *@
+@if (Open)
+{
+    <div class="backdrop" @onclick="Cancel">
+        <div class="dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" @onclick:stopPropagation="true">
+            <div class="dialog-head">
+                <div class="tile-icon tone-stop"><Icon Name="@IconName" /></div>
+                <h2 id="confirm-title">@Title</h2>
+            </div>
+            <p class="dialog-text">@Text</p>
+            <div class="dialog-actions">
+                <button type="button" class="btn" @onclick="Cancel">@CancelText</button>
+                <button type="button" class="btn btn-danger-solid" @onclick="Confirm" disabled="@Busy">
+                    @if (Busy)
+                    {
+                        <Icon Name="loader" Class="spin" />
+                    }
+                    @ConfirmText
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public bool Open { get; set; }
+
+    [Parameter]
+    public bool Busy { get; set; }
+
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = "";
+
+    [Parameter]
+    public string? Text { get; set; }
+
+    [Parameter]
+    public string ConfirmText { get; set; } = "Potwierdź";
+
+    [Parameter]
+    public string CancelText { get; set; } = "Nie, zostaw";
+
+    [Parameter]
+    public string IconName { get; set; } = "alert";
+
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private Task Confirm() => OnConfirm.InvokeAsync();
+
+    private Task Cancel() => Busy ? Task.CompletedTask : OnCancel.InvokeAsync();
+}

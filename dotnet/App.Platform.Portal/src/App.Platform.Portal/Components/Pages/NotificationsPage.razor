@@ -1,0 +1,138 @@
+@page "/notifications"
+@using App.Platform.Portal.ApiClients.Notification
+@using App.Platform.Portal.ApiClients.Notification.Models
+@inject NotificationApi Notifications
+@inject PortalClock Clock
+@inject IOptions<PortalOptions> Options
+@inject NavigationManager Navigation
+
+<PageTitle>Powiadomienia - Platform</PageTitle>
+
+<div class="page">
+    <PageHeader Title="Powiadomienia" Lead="Wiadomości, które serwis powiadomień wysyła kierowcom i klientom po zdarzeniach na platformie." />
+
+    <section class="panel">
+        <div class="toolbar">
+            <div class="chips" role="group" aria-label="Status powiadomienia">
+                <button type="button" class="chip @(Status is null ? "on" : "")" @onclick="() => Go(null)">Wszystkie</button>
+                @foreach (var status in new[] { "PENDING", "PROCESSING", "SENT", "FAILED" })
+                {
+                    var look = Look(status);
+                    <button type="button" class="chip @(Status == status ? "on" : "")" @onclick="() => Go(status)"><Icon Name="@look.Icon" />@look.Label</button>
+                }
+            </div>
+        </div>
+        <ErrorNotice Message="@_error" OnRetry="Load" />
+        @if (_items is null)
+        {
+            <Loading />
+        }
+        else if (_items.Count == 0)
+        {
+            <EmptyState IconName="bell" Title="Brak powiadomień" Text="Powiadomienia pojawią się po pierwszych zdarzeniach dostaw." />
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="data">
+                    <thead><tr><th>Kanał</th><th>Zdarzenie</th><th>Odbiorca</th><th>Status</th><th class="num">Próby</th><th>Utworzone</th><th>Wysłane</th></tr></thead>
+                    <tbody>
+                        @foreach (var n in _items)
+                        {
+                            var look = Look(n.Status?.ToString());
+                            <tr @key="n.Id">
+                                <td><span class="pill"><Icon Name="@ChannelIcon(n.Channel?.ToString())" />@n.Channel</span></td>
+                                <td><div class="cell-main">@n.EventType</div><div class="cell-sub">zdarzenie @Format.ShortId(n.EventId)</div></td>
+                                <td>
+                                    @if (n.Recipient is { } r)
+                                    {
+                                        <div>@r.FullName</div>
+                                        <div class="cell-sub">@(r.Email ?? r.PhoneNumber)</div>
+                                    }
+                                    else
+                                    {
+                                        <span class="cell-sub">-</span>
+                                    }
+                                </td>
+                                <td>
+                                    <Pill Text="@look.Label" Tone="@look.Tone" IconName="@look.Icon" />
+                                    @if (n.LastError is not null)
+                                    {
+                                        <div class="cell-sub" title="@n.LastError">@Shorten(n.LastError)</div>
+                                    }
+                                </td>
+                                <td class="num">@n.Attempts</td>
+                                <td class="cell-sub">@Format.Ago(n.CreatedAt, Clock.Now, Clock.Zone)</td>
+                                <td class="cell-sub">@(n.SentAt is null ? "-" : Format.DateTime(n.SentAt, Clock.Zone))</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        <Pager Page="PageIndex" HasNext="_hasNext" ItemCount="@(_items?.Count ?? 0)" PageChanged="GoPage" />
+    </section>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? Status { get; set; }
+
+    [SupplyParameterFromQuery(Name = "page")]
+    public int? PageQuery { get; set; }
+
+    private int PageIndex => Math.Max(PageQuery ?? 0, 0);
+
+    private List<NotificationResponse>? _items;
+    private bool _hasNext;
+    private string? _error;
+
+    protected override Task OnParametersSetAsync() => Load();
+
+    private async Task Load()
+    {
+        _error = null;
+        try
+        {
+            var slice = await Notifications.Api.Notification.Notifications.GetAsync(c =>
+            {
+                c.QueryParameters.Status = Status;
+                c.QueryParameters.Timezone = Options.Value.TimeZone;
+                c.QueryParameters.Page = PageIndex;
+                c.QueryParameters.Size = 25;
+            });
+            _items = slice?.Content ?? [];
+            _hasNext = slice?.HasNext == true;
+        }
+        catch (Exception ex)
+        {
+            _error = ApiErrors.Describe(ex).Message;
+            _items ??= [];
+        }
+    }
+
+    private static (string Label, string Tone, string Icon) Look(string? status) =>
+        status switch
+        {
+            "SENT" => ("Wysłane", "route", "circle-check"),
+            "FAILED" => ("Nieudane", "stop", "circle-x"),
+            "PROCESSING" => ("W trakcie", "signal", "loader"),
+            "PENDING" => ("W kolejce", "info", "hourglass"),
+            _ => (status ?? "-", "", "circle-help"),
+        };
+
+    private static string ChannelIcon(string? channel) =>
+        channel switch
+        {
+            "EMAIL" => "mail",
+            "SMS" => "smartphone",
+            _ => "message-square",
+        };
+
+    private static string Shorten(string text) => text.Length <= 60 ? text : text[..57] + "...";
+
+    private void Go(string? status) =>
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameters(new Dictionary<string, object?> { ["status"] = status, ["page"] = null }));
+
+    private void GoPage(int page) => Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("page", page == 0 ? null : page));
+}

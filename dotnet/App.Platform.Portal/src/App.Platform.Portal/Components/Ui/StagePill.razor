@@ -1,0 +1,6 @@
+<span class="pill tone-@DeliveryStages.Tone(Stage)"><Icon Name="@DeliveryStages.Icon(Stage)" />@DeliveryStages.Label(Stage)</span>
+
+@code {
+    [Parameter, EditorRequired]
+    public DeliveryStage Stage { get; set; }
+}

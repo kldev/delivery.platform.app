@@ -1,0 +1,127 @@
+@page "/reconciliations"
+@using App.Platform.Portal.ApiClients.Reconciliation
+@using App.Platform.Portal.ApiClients.Reconciliation.Models
+@using StatusFilter = App.Platform.Portal.ApiClients.Reconciliation.Api.Reconciliation.Reconciliations.GetStatusQueryParameterType
+@inject ReconciliationApi Reconciliations
+@inject PortalClock Clock
+@inject NavigationManager Navigation
+
+<PageTitle>Uzgodnienia - Platform</PageTitle>
+
+<div class="page">
+    <PageHeader Title="Uzgodnienia" Lead="Serwis uzgodnień porównuje to, co klient zapłacił, z tym, co rozliczono. Rozbieżności wymagają wyjaśnienia." />
+
+    <section class="panel">
+        <div class="toolbar">
+            <div class="chips" role="group" aria-label="Status uzgodnienia">
+                <button type="button" class="chip @(Status is null ? "on" : "")" @onclick="() => Go(null)">Wszystkie</button>
+                @foreach (var status in Enum.GetValues<StatusFilter>())
+                {
+                    var look = Look(status.ToString());
+                    <button type="button" class="chip @(Status == status ? "on" : "")" @onclick="() => Go(status)"><Icon Name="@look.Icon" />@look.Label</button>
+                }
+            </div>
+            @if (DeliveryId is not null)
+            {
+                <span class="pill tone-info"><Icon Name="search" />Dostawa @Format.ShortId(DeliveryId)</span>
+            }
+        </div>
+        <ErrorNotice Message="@_error" OnRetry="Load" />
+        @if (_items is null)
+        {
+            <Loading />
+        }
+        else if (_items.Count == 0)
+        {
+            <EmptyState IconName="scale" Title="@(Status == StatusFilter.DISCREPANCY ? "Brak rozbieżności" : "Brak spraw")" Text="Sprawa uzgodnienia powstaje, gdy pojawi się płatność albo rozliczenie dostawy." />
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="data">
+                    <thead><tr><th>Dostawa</th><th>Status</th><th class="num">Oczekiwano</th><th class="num">Wpłynęło</th><th class="num">Różnica</th><th>Płatność</th><th>Rozliczenie</th><th>Otwarta</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in _items)
+                        {
+                            var look = Look(r.Status?.ToString());
+                            <tr @key="r.Id">
+                                <td><ShortId Id="r.DeliveryId" Href="@($"deliveries/{r.DeliveryId}")" /></td>
+                                <td><Pill Text="@look.Label" Tone="@look.Tone" IconName="@look.Icon" /></td>
+                                <td class="num">@Format.Money(r.ExpectedAmount, r.Currency)</td>
+                                <td class="num">@Format.Money(r.ActualAmount, r.Currency)</td>
+                                <td class="num amount-diff @(r.Difference is not null and not 0 ? "debit" : "")">@Format.Money(r.Difference, r.Currency)</td>
+                                <td>@(r.PaymentId is null ? "-" : Format.ShortId(r.PaymentId))</td>
+                                <td>@(r.SettlementId is null ? "-" : Format.ShortId(r.SettlementId))</td>
+                                <td class="cell-sub">@Format.Ago(r.CreatedAt, Clock.Now, Clock.Zone)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        <Pager Page="PageIndex" HasNext="_hasNext" ItemCount="@(_items?.Count ?? 0)" PageChanged="GoPage" />
+    </section>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? StatusQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "deliveryId")]
+    public Guid? DeliveryId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "page")]
+    public int? PageQuery { get; set; }
+
+    private StatusFilter? Status => Enum.TryParse<StatusFilter>(StatusQuery, out var s) ? s : null;
+
+    private int PageIndex => Math.Max(PageQuery ?? 0, 0);
+
+    private List<ReconciliationResponse>? _items;
+    private bool _hasNext;
+    private string? _error;
+
+    protected override Task OnParametersSetAsync() => Load();
+
+    private async Task Load()
+    {
+        _error = null;
+        try
+        {
+            var slice = await Reconciliations.Api.Reconciliation.Reconciliations.GetAsync(c =>
+            {
+                c.QueryParameters.Status = Status;
+                c.QueryParameters.DeliveryId = DeliveryId;
+                c.QueryParameters.Page = PageIndex;
+                c.QueryParameters.Size = 25;
+            });
+            _items = slice?.Content ?? [];
+            _hasNext = slice?.HasNext == true;
+        }
+        catch (Exception ex)
+        {
+            _error = ApiErrors.Describe(ex).Message;
+            _items ??= [];
+        }
+    }
+
+    private static (string Label, string Tone, string Icon) Look(string? status) =>
+        status switch
+        {
+            "RECONCILED" => ("Zgodne", "route", "circle-check"),
+            "DISCREPANCY" => ("Rozbieżność", "stop", "alert"),
+            "PENDING" => ("Czeka na drugą stronę", "signal", "hourglass"),
+            "MISSING_PAYMENT" => ("Brak płatności", "stop", "credit-card"),
+            "MISSING_SETTLEMENT" => ("Brak rozliczenia", "stop", "hand-coins"),
+            _ => (status ?? "-", "", "circle-help"),
+        };
+
+    private void Go(StatusFilter? status) =>
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>
+        {
+            ["status"] = status?.ToString(),
+            ["page"] = null,
+        }));
+
+    private void GoPage(int page) => Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("page", page == 0 ? null : page));
+}

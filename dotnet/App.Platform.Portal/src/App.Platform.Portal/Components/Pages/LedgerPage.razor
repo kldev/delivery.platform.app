@@ -1,0 +1,205 @@
+@page "/ledger"
+@using App.Platform.Portal.ApiClients.Ledger
+@using App.Platform.Portal.ApiClients.Ledger.Models
+@inject LedgerApi Ledger
+@inject PortalClock Clock
+@inject NavigationManager Navigation
+
+<PageTitle>Księga - Platform</PageTitle>
+
+<div class="page">
+    <PageHeader Title="Księga" Lead="Konta platformy i kierowców z saldami. Każde rozliczenie kierowcy to transakcja: obciążenie platformy i uznanie kierowcy." />
+
+    <ErrorNotice Message="@_error" OnRetry="Load" />
+
+    <section class="panel" aria-labelledby="accounts-title">
+        <div class="panel-head">
+            <h2 id="accounts-title">Konta</h2>
+            <span class="hint">Wybierz konto, żeby zobaczyć jego zapisy</span>
+        </div>
+        <div class="panel-body">
+            @if (_accounts is null)
+            {
+                <Loading Lines="3" />
+            }
+            else if (_accounts.Count == 0)
+            {
+                <EmptyState IconName="book-open" Title="Księga jest pusta" Text="Konta powstają przy pierwszym rozliczeniu kierowcy." />
+            }
+            else
+            {
+                <div class="accounts">
+                    @foreach (var a in _accounts)
+                    {
+                        <button type="button" class="panel account @(a.Id == AccountId ? "selected" : "")" @onclick="() => Select(a.Id)" @key="a.Id">
+                            <span class="pill @(a.OwnerType?.ToString() == "PLATFORM" ? "tone-info" : "")">
+                                <Icon Name="@(a.OwnerType?.ToString() == "PLATFORM" ? "landmark" : "wallet")" />@(a.OwnerType?.ToString() == "PLATFORM" ? "Platforma" : "Kierowca")
+                            </span>
+                            <span class="cell-main">@a.Name</span>
+                            <span class="account-balance @(a.Balance < 0 ? "debit" : "")">@Format.Money(a.Balance, a.Currency)</span>
+                            <span class="cell-sub">@(a.BalanceUpdatedAt is null ? "Bez ruchów" : $"Saldo z {Format.DateTime(a.BalanceUpdatedAt, Clock.Zone)}")</span>
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+    </section>
+
+    @if (ReferenceId is not null)
+    {
+        <section class="panel" aria-labelledby="tx-title">
+            <div class="panel-head">
+                <h2 id="tx-title">Transakcje rozliczenia @Format.ShortId(ReferenceId)</h2>
+                <button type="button" class="btn btn-sm btn-ghost" @onclick='() => Navigation.NavigateTo("ledger")'><Icon Name="x" />Zamknij</button>
+            </div>
+            @if (_transactions is null)
+            {
+                <Loading Lines="3" />
+            }
+            else if (_transactions.Count == 0)
+            {
+                <EmptyState IconName="book-open" Title="Brak transakcji" Text="Księga jeszcze nie zapisała tego rozliczenia." />
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table class="data">
+                        <thead><tr><th>Transakcja</th><th>Rodzaj</th><th>Konto</th><th class="num">Kwota</th><th>Zapisana</th></tr></thead>
+                        <tbody>
+                            @foreach (var t in _transactions)
+                            {
+                                @foreach (var e in t.Entries ?? [])
+                                {
+                                    <tr @key="e.Id">
+                                        <td><ShortId Id="t.Id" /></td>
+                                        <td>@TransactionType(t.Type?.ToString())</td>
+                                        <td>@AccountName(e.AccountId)</td>
+                                        <td class="num"><EntryAmount Type="@e.Type?.ToString()" Amount="e.Amount" Currency="@t.Currency" /></td>
+                                        <td class="cell-sub">@Format.DateTime(t.CreatedAt, Clock.Zone)</td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    }
+
+    @if (AccountId is not null)
+    {
+        <section class="panel" aria-labelledby="entries-title">
+            <div class="panel-head">
+                <h2 id="entries-title">Zapisy: @AccountName(AccountId)</h2>
+                <span class="hint">Od najnowszych</span>
+            </div>
+            @if (_entries is null)
+            {
+                <Loading />
+            }
+            else if (_entries.Count == 0)
+            {
+                <EmptyState IconName="book-open" Title="Brak zapisów" Text="To konto nie miało jeszcze żadnego ruchu." />
+            }
+            else
+            {
+                <div class="table-wrap">
+                    <table class="data">
+                        <thead><tr><th>Zapis</th><th>Strona</th><th class="num">Kwota</th><th>Transakcja</th><th>Zapisany</th></tr></thead>
+                        <tbody>
+                            @foreach (var e in _entries)
+                            {
+                                <tr @key="e.Id">
+                                    <td><ShortId Id="e.Id" /></td>
+                                    <td>@(e.Type?.ToString() == "CREDIT" ? "Uznanie" : "Obciążenie")</td>
+                                    <td class="num"><EntryAmount Type="@e.Type?.ToString()" Amount="e.Amount" Currency="@AccountCurrency(AccountId)" /></td>
+                                    <td><ShortId Id="e.TransactionId" /></td>
+                                    <td class="cell-sub">@Format.DateTime(e.CreatedAt, Clock.Zone)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            <Pager Page="PageIndex" HasNext="_entriesHasNext" ItemCount="@(_entries?.Count ?? 0)" PageChanged="GoPage" />
+        </section>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "accountId")]
+    public Guid? AccountId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "referenceId")]
+    public Guid? ReferenceId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "page")]
+    public int? PageQuery { get; set; }
+
+    private int PageIndex => Math.Max(PageQuery ?? 0, 0);
+
+    private List<LedgerAccountResponse>? _accounts;
+    private List<LedgerEntryResponse>? _entries;
+    private bool _entriesHasNext;
+    private List<LedgerTransactionResponse>? _transactions;
+    private string? _error;
+
+    protected override Task OnParametersSetAsync() => Load();
+
+    private async Task Load()
+    {
+        _error = null;
+        try
+        {
+            var accounts = Ledger.Api.Ledger.LedgerAccounts.GetAsync(c => c.QueryParameters.Size = 200);
+            Task<SliceResponseLedgerEntryResponse?>? entries = AccountId is { } accountId
+                ? Ledger.Api.Ledger.LedgerEntries.GetAsync(c =>
+                {
+                    c.QueryParameters.AccountId = accountId;
+                    c.QueryParameters.Page = PageIndex;
+                    c.QueryParameters.Size = 25;
+                })
+                : null;
+            Task<SliceResponseLedgerTransactionResponse?>? transactions = ReferenceId is { } referenceId
+                ? Ledger.Api.Ledger.LedgerTransactions.GetAsync(c => c.QueryParameters.ReferenceId = referenceId)
+                : null;
+
+            _accounts = (await accounts)?.Content?.OrderBy(a => a.OwnerType?.ToString() == "PLATFORM" ? 0 : 1).ThenBy(a => a.Name).ToList() ?? [];
+            if (entries is not null)
+            {
+                var slice = await entries;
+                _entries = slice?.Content?.OrderByDescending(e => e.CreatedAt).ToList() ?? [];
+                _entriesHasNext = slice?.HasNext == true;
+            }
+            if (transactions is not null)
+                _transactions = (await transactions)?.Content ?? [];
+        }
+        catch (Exception ex)
+        {
+            _error = ApiErrors.Describe(ex).Message;
+            _accounts ??= [];
+        }
+    }
+
+    private string AccountName(Guid? id) => _accounts?.FirstOrDefault(a => a.Id == id)?.Name ?? Format.ShortId(id);
+
+    private string? AccountCurrency(Guid? id) => _accounts?.FirstOrDefault(a => a.Id == id)?.Currency;
+
+    private static string TransactionType(string? type) =>
+        type switch
+        {
+            "DRIVER_SETTLEMENT" => "Rozliczenie kierowcy",
+            "DRIVER_PAYOUT" => "Wypłata kierowcy",
+            "ADJUSTMENT" => "Korekta",
+            _ => type ?? "-",
+        };
+
+    private void Select(Guid? id) =>
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>
+        {
+            ["accountId"] = id == AccountId ? null : id,
+            ["page"] = null,
+        }));
+
+    private void GoPage(int page) => Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("page", page == 0 ? null : page));
+}

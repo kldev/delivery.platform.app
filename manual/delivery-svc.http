@@ -1,0 +1,103 @@
+### create driver
+POST http://localhost:8081/api/drivers
+Content-Type: application/json
+
+{
+  "firstName": "John",
+  "lastName": "Doe",
+  "phoneNumber": "+48123456784"
+}
+
+> {%
+    client.global.set("driverId", response.body.id);
+%}
+
+### create driver
+POST http://localhost:8081/api/drivers
+Content-Type: application/json
+
+{
+  "firstName": "Anna",
+  "lastName": "Haris",
+  "phoneNumber": "+48134456784"
+}
+
+> {%
+    client.global.set("driverId", response.body.id);
+%}
+
+### get drivers
+GET http://localhost:8081/api/drivers
+
+> {%
+    client.global.set("driverId", response.body[0].id);
+%}
+
+
+### create delivery
+POST http://localhost:8081/api/deliveries
+Content-Type: application/json
+Idempotency-Key: {{$random.uuid}}
+
+{
+  "deliveryAddress": "Test A",
+  "distanceKm": 50.0,
+  "pickupAddress": "Test B"
+}
+
+> {%
+    client.global.set("deliveryId", response.body.id);
+%}
+
+### confirm delivery
+POST http://localhost:8081/api/deliveries/{{deliveryId}}/confirm
+Content-Type: application/json
+
+
+### cancel delivery
+POST http://localhost:8081/api/deliveries/{{deliveryId}}/cancel
+Content-Type: application/json
+
+### get deliveries
+GET http://localhost:8081/api/deliveries
+
+### get deliveries
+GET http://localhost:8081/api/deliveries?status=CREATED
+
+> {%
+
+    client.global.set("deliveryId", response.body.content[0].id);
+%}
+
+
+### get payments
+GET http://localhost:9080/api/payments
+
+### get payments
+GET http://localhost:9080/api/payments?status=Pending
+
+> {%
+    client.global.set("paymentId", response.body[0].id);
+    client.global.set("deliveryId", response.body[0].deliveryId);
+%}
+
+### accept/paid payments
+PUT http://localhost:9080/api/payments/{{paymentId}}/accept
+
+### decline payments
+PUT http://localhost:9080/api/payments/{{paymentId}}/decline
+
+### pickup delivery
+POST http://localhost:8081/api/deliveries/{{deliveryId}}/pickup
+Content-Type: application/json
+
+### start delivery
+POST http://localhost:8081/api/deliveries/{{deliveryId}}/start
+Content-Type: application/json
+
+### complete delivery
+POST http://localhost:8081/api/deliveries/{{deliveryId}}/complete
+Content-Type: application/json
+
+### get deliveries status duration
+GET http://localhost:8081/api/deliveries/status-durations?deliveryId={{deliveryId}}

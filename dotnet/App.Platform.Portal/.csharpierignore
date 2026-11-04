@@ -1,0 +1,6 @@
+# Kiota's output is regenerated, never formatted by hand.
+src/App.Platform.Portal.ApiClients/Generated/
+# CSharpier 1.x formats XML too; keep it to C#.
+**/*.csproj
+**/*.props
+**/*.slnx

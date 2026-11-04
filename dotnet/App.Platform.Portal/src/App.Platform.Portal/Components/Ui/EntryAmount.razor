@@ -1,0 +1,17 @@
+@* A ledger entry's amount: credit (in) green with an arrow down-left, debit (out) red with an arrow up-right. *@
+<span class="@(IsCredit ? "credit" : "debit")" style="display:inline-flex; align-items:center; gap:4px; font-weight:650">
+    <Icon Name="@(IsCredit ? "arrow-down-left" : "arrow-up-right")" />@(IsCredit ? "+" : "−")@Format.Money(Amount is null ? null : Math.Abs(Amount.Value), Currency)
+</span>
+
+@code {
+    [Parameter]
+    public string? Type { get; set; }
+
+    [Parameter]
+    public double? Amount { get; set; }
+
+    [Parameter]
+    public string? Currency { get; set; }
+
+    private bool IsCredit => Type == "CREDIT";
+}

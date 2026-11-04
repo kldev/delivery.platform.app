@@ -1,0 +1,543 @@
+@page "/deliveries/{Id:guid}"
+@implements IDisposable
+@using App.Platform.Portal.ApiClients.Delivery
+@using App.Platform.Portal.ApiClients.Delivery.Models
+@using App.Platform.Portal.ApiClients.Ledger
+@using App.Platform.Portal.ApiClients.Payment
+@using App.Platform.Portal.ApiClients.Payment.Models
+@using App.Platform.Portal.ApiClients.Reconciliation
+@using App.Platform.Portal.ApiClients.Reconciliation.Models
+@using App.Platform.Portal.ApiClients.Settlement
+@using App.Platform.Portal.ApiClients.Settlement.Models
+@using DeliveryProblem = App.Platform.Portal.ApiClients.Delivery.Models.ProblemDetail
+@inject DeliveryApi Deliveries
+@inject PaymentApi Payments
+@inject SettlementApi Settlements
+@inject LedgerApi Ledger
+@inject ReconciliationApi Reconciliations
+@inject PortalClock Clock
+@inject Toasts Toasts
+@inject IOptions<PortalOptions> Options
+
+<PageTitle>Dostawa @Format.ShortId(Id) - Platform</PageTitle>
+
+<div class="page">
+    <PageHeader Title="@($"Dostawa {Format.ShortId(Id)}")" BackHref="deliveries" BackText="Dostawy">
+        <Actions>
+            @if (_delivery is not null)
+            {
+                <ShortId Id="Id" />
+                @if (DeliveryStages.CanCancel(Stage))
+                {
+                    <button type="button" class="btn btn-danger" @onclick="() => _confirmCancel = true" disabled="@(_busy is not null)">
+                        <Icon Name="ban" />Anuluj dostawę
+                    </button>
+                }
+            }
+        </Actions>
+    </PageHeader>
+
+    @if (_notFound)
+    {
+        <div class="panel">
+            <EmptyState IconName="search" Title="Nie ma takiej dostawy" Text="Mogła zostać usunięta albo identyfikator jest niepełny.">
+                <a class="btn" href="deliveries"><Icon Name="arrow-left" />Wróć do listy</a>
+            </EmptyState>
+        </div>
+    }
+    else if (_delivery is null)
+    {
+        <ErrorNotice Message="@_error" OnRetry="Refresh" />
+        <div class="panel"><Loading Lines="6" /></div>
+    }
+    else
+    {
+        <div class="grid-2">
+            <div class="page" style="gap: 22px">
+                <section class="panel" aria-label="Trasa">
+                    <div class="panel-body journey">
+                        <div class="end">
+                            <Icon Name="map-pin" />
+                            <div>
+                                <div class="end-label">Odbiór</div>
+                                <div class="end-addr">@_delivery.PickupAddress</div>
+                            </div>
+                        </div>
+                        <div class="distance">
+                            <span>@Format.Number(_delivery.DistanceKm) km</span>
+                            <span class="rule"></span>
+                            <Icon Name="truck" />
+                        </div>
+                        <div class="end">
+                            <div>
+                                <div class="end-label">Doręczenie</div>
+                                <div class="end-addr">@_delivery.DeliveryAddress</div>
+                            </div>
+                            <Icon Name="flag" />
+                        </div>
+                    </div>
+                    <div class="panel-body" style="padding-top: 6px; padding-bottom: 26px">
+                        <RouteLine Stage="Stage" CancelledAt="_cancelledAt" Variant="big" StopMeta="StopMeta" />
+                    </div>
+                    <div class="facts">
+                        <div class="fact">
+                            <div class="fact-label">Cena</div>
+                            <div class="fact-value">@Format.Money(_delivery.Price, _delivery.Currency)</div>
+                        </div>
+                        <div class="fact">
+                            <div class="fact-label">Etap</div>
+                            <div class="fact-value"><StagePill Stage="Stage" /></div>
+                        </div>
+                        <div class="fact">
+                            <div class="fact-label">Kierowca</div>
+                            <div class="fact-value">@(_driver is null ? "-" : $"{_driver.FirstName} {_driver.LastName}")</div>
+                        </div>
+                        <div class="fact">
+                            <div class="fact-label">Utworzona</div>
+                            <div class="fact-value">@Format.DateTime(_delivery.CreatedAt, Clock.Zone)</div>
+                        </div>
+                    </div>
+                </section>
+
+                @NextStep()
+
+                <ErrorNotice Message="@_error" Title="Część danych jest nieaktualna" OnRetry="Refresh" />
+            </div>
+
+            <aside class="panel" aria-labelledby="trail-title">
+                <div class="panel-head">
+                    <div>
+                        <h2 id="trail-title">Ślad w serwisach</h2>
+                        <div class="hint">@(_syncing ? "Czekam na odpowiedź serwisów..." : "Co inne serwisy zrobiły z tą dostawą")</div>
+                    </div>
+                    <button type="button" class="btn btn-icon btn-ghost" @onclick="Refresh" aria-label="Odśwież"><Icon Name="refresh" Class="@(_refreshing ? "spin" : null)" /></button>
+                </div>
+                <div class="sync-bar @(_syncing ? "on" : "")" role="progressbar" aria-busy="@_syncing" aria-label="Synchronizacja"></div>
+                <ol class="trail">
+                    @foreach (var step in _steps)
+                    {
+                        <li class="trail-step @StateClass(step.State) @(_arrived.Contains(step.Kind) ? "arrived" : "")" @key="step.Kind">
+                            <span class="trail-badge">
+                                @if (step.State == TrailState.Waiting && _syncing)
+                                {
+                                    <Icon Name="loader" Class="spin" />
+                                }
+                                else if (step.State == TrailState.Done)
+                                {
+                                    <Icon Name="check" />
+                                }
+                                else if (step.State == TrailState.Failed)
+                                {
+                                    <Icon Name="x" />
+                                }
+                                else
+                                {
+                                    <Icon Name="@step.Icon" />
+                                }
+                            </span>
+                            <div>
+                                <div class="trail-title">@step.Title <span class="trail-service">@step.Service</span></div>
+                                <div class="trail-text">
+                                    @if (step.State == TrailState.Waiting && !_syncing)
+                                    {
+                                        @:Brak odpowiedzi od @step.Service. Sprawdź, czy serwis działa, i odśwież.
+                                    }
+                                    else
+                                    {
+                                        @step.Text
+                                    }
+                                </div>
+                                @TrailExtra(step)
+                            </div>
+                        </li>
+                    }
+                </ol>
+            </aside>
+        </div>
+    }
+</div>
+
+<ConfirmDialog Open="_confirmCancel" Busy="@(_busy == DeliveryAction.Cancel)" Title="Anulować tę dostawę?" IconName="ban"
+               Text="Dostawa zatrzyma się na obecnym etapie. Tego nie da się cofnąć."
+               ConfirmText="Tak, anuluj" OnCancel="() => _confirmCancel = false" OnConfirm="CancelDelivery" />
+
+@code {
+    [Parameter]
+    public Guid Id { get; set; }
+
+    private DeliveryResponse? _delivery;
+    private List<DeliveryStatusDurationResponse> _durations = [];
+    private DriverResponse? _driver;
+    private PaymentItemResponse? _payment;
+    private ExternalTransactionItemResponse? _external;
+    private SettlementResponse? _settlement;
+    private int _ledgerTransactions;
+    private ReconciliationResponse? _reconciliation;
+    private IReadOnlyList<TrailStep> _steps = [];
+    private Dictionary<TrailStepKind, TrailState> _previous = [];
+    private HashSet<TrailStepKind> _arrived = [];
+    private DeliveryStage? _cancelledAt;
+
+    private string? _error;
+    private bool _notFound;
+    private bool _refreshing;
+    private bool _syncing;
+    private DateTimeOffset _syncUntil;
+    private DeliveryAction? _busy;
+    private string? _paymentBusy;
+    private bool _confirmCancel;
+
+    private readonly CancellationTokenSource _stop = new();
+
+    private DeliveryStage Stage => DeliveryStages.From(_delivery?.Status);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _syncUntil = Clock.Now + Options.Value.SyncWindow;
+        await Refresh();
+    }
+
+    protected override void OnInitialized() => _ = SyncLoop();
+
+    /// <summary>
+    /// While some service still has to react (a step is Waiting) and the sync window is open, ask again every
+    /// SyncInterval: the trail fills in as the events go through Kafka, without the person pressing anything.
+    /// </summary>
+    private async Task SyncLoop()
+    {
+        using var timer = new PeriodicTimer(Options.Value.SyncInterval);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(_stop.Token))
+            {
+                if (_syncing && !_refreshing && _busy is null)
+                {
+                    // A timer tick is not a UI event: render explicitly after the refresh.
+                    await InvokeAsync(async () =>
+                    {
+                        await Refresh();
+                        StateHasChanged();
+                    });
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // the page was left
+        }
+    }
+
+    private async Task Refresh()
+    {
+        _refreshing = true;
+        var errors = new List<string>();
+        try
+        {
+            var item = Deliveries.Api.Delivery.Deliveries[Id];
+            var delivery = item.GetAsync(cancellationToken: _stop.Token);
+            var durations = Deliveries.Api.Delivery.Deliveries.StatusDurations.GetAsync(c =>
+            {
+                c.QueryParameters.DeliveryId = Id;
+                c.QueryParameters.Size = 50;
+            }, _stop.Token);
+            var payments = Payments.Api.Payment.Payments.GetAsync(c => c.QueryParameters.DeliveryId = Id, _stop.Token);
+            var external = Payments.Api.Payment.Payments.External.GetAsync(c => c.QueryParameters.DeliveryId = Id, _stop.Token);
+            var settlements = Settlements.Api.Settlement.Settlements.GetAsync(c => c.QueryParameters.DeliveryId = Id, _stop.Token);
+            var reconciliations = Reconciliations.Api.Reconciliation.Reconciliations.GetAsync(c => c.QueryParameters.DeliveryId = Id, _stop.Token);
+
+            try
+            {
+                _delivery = await delivery;
+            }
+            catch (DeliveryProblem problem) when (problem.ResponseStatusCode == 404)
+            {
+                _notFound = true;
+                return;
+            }
+
+            _durations = await Read(durations, "delivery-service", errors) is { } d ? d.Content ?? [] : _durations;
+            _payment = await Read(payments, "payment-service", errors) is { } p ? p.OrderByDescending(x => x.CreatedAt).FirstOrDefault() : _payment;
+            _external = await Read(external, "payment-service", errors) is { } x ? x.FirstOrDefault() : _external;
+            _settlement = await Read(settlements, "settlement-service", errors) is { } s ? s.Content?.FirstOrDefault() : _settlement;
+            _reconciliation = await Read(reconciliations, "reconciliation-service", errors) is { } r ? r.Content?.FirstOrDefault() : _reconciliation;
+
+            if (_delivery?.DriverId is { } driverId && _driver?.Id != driverId)
+                _driver = await Read(Deliveries.Api.Delivery.Drivers[driverId].GetAsync(cancellationToken: _stop.Token), "delivery-service", errors);
+            if (_settlement?.Id is { } settlementId)
+            {
+                var ledger = await Read(Ledger.Api.Ledger.LedgerTransactions.GetAsync(c => c.QueryParameters.ReferenceId = settlementId, _stop.Token), "ledger-service", errors);
+                _ledgerTransactions = ledger?.Content?.Count ?? _ledgerTransactions;
+            }
+
+            _cancelledAt = _durations.LastOrDefault(x => DeliveryStages.From(x.Status) == DeliveryStage.Cancelled) is { } cancelled
+                ? DeliveryStages.From(cancelled.PreviousStatus)
+                : null;
+            BuildTrail();
+            _error = errors.Count == 0 ? null : $"Nie odpowiada: {string.Join(", ", errors.Distinct())}. Pokazuję ostatnie znane dane.";
+        }
+        catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+        {
+            // the page was left
+        }
+        catch (Exception ex)
+        {
+            _error = ApiErrors.Describe(ex).Message;
+        }
+        finally
+        {
+            _refreshing = false;
+            _syncing = DeliveryTrail.AwaitsServices(_steps) && Clock.Now < _syncUntil;
+        }
+    }
+
+    private static async Task<T?> Read<T>(Task<T?> call, string service, List<string> errors)
+        where T : class
+    {
+        try
+        {
+            return await call;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            errors.Add(service);
+            return null;
+        }
+    }
+
+    private void BuildTrail()
+    {
+        _steps = DeliveryTrail.Build(
+            new TrailFacts(
+                Stage,
+                _cancelledAt,
+                _payment?.Status,
+                _payment is null ? null : Format.Money(_payment.Amount, _payment.Currency),
+                _external is not null,
+                _driver is null ? null : $"{_driver.FirstName} {_driver.LastName}, {_driver.PhoneNumber}",
+                _delivery?.DriverId is not null,
+                _settlement is null ? null : $"{Format.Money(_settlement.DriverAmount, _settlement.Currency)} dla kierowcy ({Format.Percent(_settlement.TotalPercentage)} z {Format.Money(_settlement.DeliveryAmount, _settlement.Currency)}).",
+                _settlement is not null,
+                _ledgerTransactions,
+                _reconciliation?.Status?.ToString(),
+                _reconciliation is null ? null : Format.Money(_reconciliation.Difference, _reconciliation.Currency)
+            )
+        );
+
+        // A step that has just changed plays its arrival once.
+        _arrived = _previous.Count == 0
+            ? []
+            : [.. _steps.Where(s => _previous.TryGetValue(s.Kind, out var was) && was != s.State && s.State != TrailState.Waiting).Select(s => s.Kind)];
+        _previous = _steps.ToDictionary(s => s.Kind, s => s.State);
+    }
+
+    private async Task Run(DeliveryAction action)
+    {
+        var info = DeliveryStages.Info(action);
+        _busy = action;
+        try
+        {
+            var item = Deliveries.Api.Delivery.Deliveries[Id];
+            var result = action switch
+            {
+                DeliveryAction.Confirm => await item.Confirm.PostAsync(),
+                DeliveryAction.AssignDriver => await item.AssignDriver.PostAsync(new AssignDriverRequest()),
+                DeliveryAction.Pickup => await item.Pickup.PostAsync(),
+                DeliveryAction.Start => await item.Start.PostAsync(),
+                DeliveryAction.Complete => await item.Complete.PostAsync(),
+                DeliveryAction.Cancel => await item.Cancel.PostAsync(),
+                _ => throw new ArgumentOutOfRangeException(nameof(action)),
+            };
+            Toasts.Success(info.Done, $"Etap: {DeliveryStages.Label(DeliveryStages.From(result?.Status))}.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error($"{info.Label}: nie udało się", ApiErrors.Describe(ex).Message);
+        }
+        finally
+        {
+            _busy = null;
+        }
+        _syncUntil = Clock.Now + Options.Value.SyncWindow;
+        await Refresh();
+    }
+
+    private async Task CancelDelivery()
+    {
+        await Run(DeliveryAction.Cancel);
+        _confirmCancel = false;
+    }
+
+    private async Task DecidePayment(string decision)
+    {
+        if (_payment?.Id is not { } paymentId)
+            return;
+        _paymentBusy = decision;
+        try
+        {
+            await Payments.Api.Payment.Payments[paymentId][decision].PutAsync();
+            if (decision == "accept")
+                Toasts.Success("Płatność zaakceptowana", "Serwis dostaw przydzieli teraz kierowcę.");
+            else
+                Toasts.Success("Płatność odrzucona", "Serwis dostaw anuluje dostawę.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error("Nie udało się zapisać decyzji", ApiErrors.Describe(ex).Message);
+        }
+        finally
+        {
+            _paymentBusy = null;
+        }
+        _syncUntil = Clock.Now + Options.Value.SyncWindow;
+        await Refresh();
+    }
+
+    /// <summary>
+    /// What the payment provider would send after collecting the money: its transaction for the payment. Locally
+    /// there is no provider, so the portal sends it on request - the payment service then publishes payment.completed.
+    /// </summary>
+    private async Task SimulateProviderTransaction()
+    {
+        if (_payment?.Id is not { } paymentId)
+            return;
+        _paymentBusy = "external";
+        try
+        {
+            await Payments.Api.Payment.Payments.External.PostAsync(new CreateExternalCommand
+            {
+                PaymentId = paymentId,
+                TransactionId = $"SIM-{Guid.NewGuid():N}"[..16],
+                Amount = _payment.Amount,
+                Provider = "portal-simulation",
+            });
+            Toasts.Success("Wpłata od operatora zarejestrowana", "Serwis uzgodnień porówna ją z rozliczeniem kierowcy.");
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error("Nie udało się zarejestrować wpłaty", ApiErrors.Describe(ex).Message);
+        }
+        finally
+        {
+            _paymentBusy = null;
+        }
+        _syncUntil = Clock.Now + Options.Value.SyncWindow;
+        await Refresh();
+    }
+
+    private string? StopMeta(DeliveryStage stop)
+    {
+        var row = _durations.LastOrDefault(x => DeliveryStages.From(x.Status) == stop);
+        if (row is null)
+            return null;
+        var at = Format.Time(row.StatusFrom, Clock.Zone);
+        return row.StatusTo is null ? at : $"{at}, {Format.Duration(row.DurationSeconds)}";
+    }
+
+    private static string StateClass(TrailState state) =>
+        state switch
+        {
+            TrailState.Done => "done",
+            TrailState.Waiting => "waiting",
+            TrailState.Action => "action",
+            TrailState.Partial => "waiting",
+            TrailState.Failed => "failed",
+            _ => "later",
+        };
+
+    private RenderFragment TrailExtra(TrailStep step) => step.Kind switch
+    {
+        TrailStepKind.Payment when step.State == TrailState.Action => @<div class="trail-actions">
+            <button type="button" class="btn btn-sm btn-primary" disabled="@(_paymentBusy is not null)" @onclick='() => DecidePayment("accept")'>
+                <Icon Name="@(_paymentBusy == "accept" ? "loader" : "check")" Class="@(_paymentBusy == "accept" ? "spin" : null)" />Akceptuj
+            </button>
+            <button type="button" class="btn btn-sm btn-danger" disabled="@(_paymentBusy is not null)" @onclick='() => DecidePayment("decline")'>
+                <Icon Name="@(_paymentBusy == "decline" ? "loader" : "x")" Class="@(_paymentBusy == "decline" ? "spin" : null)" />Odrzuć
+            </button>
+        </div>,
+        TrailStepKind.Payment when _payment?.Status == "Paid" && _external is null => @<div class="trail-actions">
+            <button type="button" class="btn btn-sm" disabled="@(_paymentBusy is not null)" @onclick="SimulateProviderTransaction"
+                    title="Wysyła to, co w produkcji wysłałby operator płatności (POST /payments/external)">
+                <Icon Name="@(_paymentBusy == "external" ? "loader" : "landmark")" Class="@(_paymentBusy == "external" ? "spin" : null)" />Symuluj wpłatę od operatora
+            </button>
+        </div>,
+        TrailStepKind.Settlement when _settlement is not null => @<div class="trail-actions"><a href="settlements?deliveryId=@Id">Szczegóły rozliczenia</a></div>,
+        TrailStepKind.Ledger when _settlement is not null && _ledgerTransactions > 0 => @<div class="trail-actions"><a href="ledger?referenceId=@_settlement.Id">Zapisy w księdze</a></div>,
+        TrailStepKind.Reconciliation when _reconciliation is not null => @<div class="trail-actions"><a href="reconciliations?deliveryId=@Id">Sprawa uzgodnienia</a></div>,
+        _ => @<text></text>,
+    };
+
+    private RenderFragment NextStep() => __builder =>
+    {
+        var next = DeliveryStages.NextAction(Stage);
+        if (Stage == DeliveryStage.Delivered)
+        {
+            var at = _durations.LastOrDefault(x => DeliveryStages.From(x.Status) == DeliveryStage.Delivered)?.StatusFrom;
+            <section class="next-step done">
+                <div class="next-icon"><Icon Name="package-check" /></div>
+                <div class="next-text">
+                    <h2>Dostawa zakończona</h2>
+                    <div class="next-sub">Doręczona @Format.DateTime(at ?? _delivery?.UpdatedAt, Clock.Zone). Rozliczenie kierowcy i uzgodnienie widać w śladzie obok.</div>
+                </div>
+            </section>
+        }
+        else if (Stage == DeliveryStage.Cancelled)
+        {
+            <section class="next-step halted">
+                <div class="next-icon"><Icon Name="ban" /></div>
+                <div class="next-text">
+                    <h2>Dostawa anulowana</h2>
+                    <div class="next-sub">Zatrzymana na etapie: @DeliveryStages.Label(_cancelledAt ?? DeliveryStage.Created).</div>
+                </div>
+            </section>
+        }
+        else if (Stage == DeliveryStage.Confirmed)
+        {
+            <section class="next-step">
+                <div class="next-icon"><Icon Name="hourglass" /></div>
+                <div class="next-text">
+                    <h2>@(_payment?.Status == "Paid" ? "Płatność przyjęta, czekam na kierowcę" : "Czeka na płatność")</h2>
+                    <div class="next-sub">
+                        @(_payment?.Status switch
+                        {
+                            "Pending" => "Zaakceptuj płatność w śladzie obok - serwis dostaw sam przydzieli wolnego kierowcę.",
+                            "Paid" => "Serwis dostaw przydziela wolnego kierowcę. Jeśli żaden nie jest wolny, przydziel ręcznie.",
+                            _ => "Serwis płatności zakłada płatność za to zlecenie.",
+                        })
+                    </div>
+                </div>
+                <button type="button" class="btn" disabled="@(_busy is not null)" @onclick="() => Run(DeliveryAction.AssignDriver)">
+                    <Icon Name="@(_busy == DeliveryAction.AssignDriver ? "loader" : "user-check")" Class="@(_busy == DeliveryAction.AssignDriver ? "spin" : null)" />Przydziel ręcznie
+                </button>
+            </section>
+        }
+        else if (next is not null)
+        {
+            <section class="next-step">
+                <div class="next-icon"><Icon Name="@next.Icon" /></div>
+                <div class="next-text">
+                    <h2>Następny krok: @next.Label.ToLowerInvariant()</h2>
+                    <div class="next-sub">@NextHint()</div>
+                </div>
+                <button type="button" class="btn btn-primary" disabled="@(_busy is not null)" @onclick="() => Run(next.Action)">
+                    <Icon Name="@(_busy == next.Action ? "loader" : "arrow-right")" Class="@(_busy == next.Action ? "spin" : null)" />@next.Label
+                </button>
+            </section>
+        }
+    };
+
+    private string NextHint() =>
+        Stage switch
+        {
+            DeliveryStage.Created => $"Po potwierdzeniu serwis płatności założy płatność na {Format.Money(_delivery?.Price, _delivery?.Currency)}.",
+            DeliveryStage.Assigned => _driver is null ? "Kierowca jedzie po paczkę." : $"{_driver.FirstName} {_driver.LastName} jedzie po paczkę.",
+            DeliveryStage.PickedUp => "Paczka jest u kierowcy. Wyślij ją w drogę do odbiorcy.",
+            DeliveryStage.InTransit => "Po doręczeniu serwis rozliczeń policzy wynagrodzenie kierowcy.",
+            _ => "",
+        };
+
+    public void Dispose()
+    {
+        _stop.Cancel();
+        _stop.Dispose();
+    }
+}

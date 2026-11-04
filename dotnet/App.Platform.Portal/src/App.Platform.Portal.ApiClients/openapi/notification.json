@@ -1,0 +1,410 @@
+{
+  "openapi": "3.1.0",
+  "tags": [
+    {
+      "name": "Notifications"
+    }
+  ],
+  "components": {
+    "schemas": {
+      "CreateNotificationRequest": {
+        "type": "object",
+        "required": [
+          "eventId",
+          "eventType",
+          "channel",
+          "payload"
+        ],
+        "properties": {
+          "eventId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "pattern": "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}"
+          },
+          "eventType": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\S",
+            "maxLength": 255
+          },
+          "channel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NotificationChannelDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payload": {
+            "description": "Any JSON object; a `deliveryId` in it is used to find the driver when recipient is omitted",
+            "type": [
+              "array",
+              "null"
+            ],
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObjectNode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recipient": {
+            "description": "Omit to notify the driver of the delivery named in payload.deliveryId",
+            "type": [
+              "object",
+              "null"
+            ],
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipientDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "JsonNode": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "NotificationChannelDto": {
+        "type": "string",
+        "enum": [
+          "EMAIL",
+          "SMS",
+          "PUSH"
+        ]
+      },
+      "NotificationResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "eventId",
+          "eventType",
+          "channel",
+          "recipient",
+          "payload",
+          "status",
+          "attempts",
+          "lastError",
+          "createdAt",
+          "sentAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}"
+          },
+          "eventId": {
+            "type": "string",
+            "format": "uuid",
+            "pattern": "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/NotificationChannelDto"
+          },
+          "recipient": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecipientDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payload": {
+            "$ref": "#/components/schemas/JsonNode"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NotificationStatusDto"
+          },
+          "attempts": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "lastError": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "examples": [
+              "2022-03-10T16:15:50Z"
+            ]
+          },
+          "sentAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "examples": [
+              "2022-03-10T16:15:50Z"
+            ]
+          }
+        }
+      },
+      "NotificationStatusDto": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "PROCESSING",
+          "SENT",
+          "FAILED"
+        ]
+      },
+      "ObjectNode": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "RecipientDto": {
+        "type": "object",
+        "properties": {
+          "fullName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 200
+          },
+          "phoneNumber": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "\\+?[0-9]{6,20}"
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 320
+          }
+        }
+      },
+      "SliceResponseNotificationResponse": {
+        "type": "object",
+        "required": [
+          "content",
+          "hasNext"
+        ],
+        "properties": {
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NotificationResponse"
+            }
+          },
+          "hasNext": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/notification/notifications": {
+      "get": {
+        "summary": "List notifications",
+        "description": "Newest first. `from` and `to` are days (of createdAt) in `timezone`, both inclusive.",
+        "tags": [
+          "Notifications"
+        ],
+        "parameters": [
+          {
+            "name": "eventId",
+            "in": "query",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "uuid",
+              "pattern": "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}"
+            },
+            "required": true
+          },
+          {
+            "description": "First day (yyyy-MM-dd)",
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date",
+              "examples": [
+                "2022-03-10"
+              ]
+            },
+            "required": true
+          },
+          {
+            "description": "Zero-based page number",
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0,
+              "default": 0
+            },
+            "required": true
+          },
+          {
+            "description": "Page size, 1 to 500",
+            "name": "size",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 100
+            },
+            "required": true
+          },
+          {
+            "description": "PENDING, PROCESSING, SENT or FAILED",
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "required": true
+          },
+          {
+            "description": "IANA time zone of from/to",
+            "name": "timezone",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "Europe/Warsaw"
+            },
+            "required": true
+          },
+          {
+            "description": "Last day (yyyy-MM-dd)",
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date",
+              "examples": [
+                "2022-03-10"
+              ]
+            },
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SliceResponseNotificationResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Queue a notification",
+        "description": "Queued as PENDING and sent by the scheduler. One notification per event and channel (409 otherwise).",
+        "tags": [
+          "Notifications"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNotificationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/api/notification/notifications/{notificationId}": {
+      "get": {
+        "summary": "Get a notification",
+        "tags": [
+          "Notifications"
+        ],
+        "parameters": [
+          {
+            "name": "notificationId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "info": {
+    "title": "Delivery notification API (via Gateway)",
+    "version": "0.0.1-SNAPSHOT"
+  }
+}

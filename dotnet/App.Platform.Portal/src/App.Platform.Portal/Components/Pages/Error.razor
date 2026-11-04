@@ -1,0 +1,24 @@
+@page "/Error"
+@using System.Diagnostics
+
+<PageTitle>Błąd - Platform</PageTitle>
+
+<div class="page">
+    <div class="panel">
+        <EmptyState IconName="alert" Title="Coś poszło nie tak" Text="Strona nie mogła się wyświetlić. Spróbuj ponownie za chwilę.">
+            @if (RequestId is not null)
+            {
+                <p class="cell-sub">Identyfikator żądania: @RequestId</p>
+            }
+        </EmptyState>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+
+    protected override void OnInitialized() => RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

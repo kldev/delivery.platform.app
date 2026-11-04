@@ -1,0 +1,176 @@
+@page "/deliveries"
+@using App.Platform.Portal.ApiClients.Delivery
+@using App.Platform.Portal.ApiClients.Delivery.Models
+@using DeliveryStatusFilter = App.Platform.Portal.ApiClients.Delivery.Api.Delivery.Deliveries.GetStatusQueryParameterType
+@inject DeliveryApi Deliveries
+@inject PortalClock Clock
+@inject NavigationManager Navigation
+
+<PageTitle>Dostawy - Platform</PageTitle>
+
+<div class="page">
+    <PageHeader Title="Dostawy" Lead="Każde zlecenie z jego miejscem na trasie. Otwórz dostawę, żeby przesunąć ją dalej.">
+        <Actions>
+            <a class="btn btn-primary" href="deliveries/new"><Icon Name="plus" />Nowa dostawa</a>
+        </Actions>
+    </PageHeader>
+
+    <section class="panel">
+        <div class="toolbar">
+            <div class="chips" role="group" aria-label="Etap">
+                <button type="button" class="chip @(Stage is null ? "on" : "")" @onclick="() => Go(null, Search, 0)">Wszystkie</button>
+                @foreach (var stage in DeliveryStages.Route.Append(DeliveryStage.Cancelled))
+                {
+                    <button type="button" class="chip @(Stage == stage ? "on" : "")" @onclick="() => Go(stage, Search, 0)">
+                        <Icon Name="@DeliveryStages.Icon(stage)" />@DeliveryStages.Label(stage)
+                    </button>
+                }
+            </div>
+            <form class="search" @onsubmit="SubmitSearch">
+                <Icon Name="search" />
+                <input type="search" placeholder="Pełny identyfikator dostawy" @bind="_searchInput" aria-label="Szukaj po identyfikatorze" />
+            </form>
+        </div>
+
+        <ErrorNotice Message="@_error" OnRetry="Load" />
+
+        @if (_items is null)
+        {
+            <Loading Lines="8" />
+        }
+        else if (_items.Count == 0)
+        {
+            @if (Stage is null && Search is null)
+            {
+                <EmptyState IconName="package" Title="Jeszcze nie ma dostaw" Text="Utwórz pierwsze zlecenie, a pojawi się na tej liście.">
+                    <a class="btn btn-primary" href="deliveries/new"><Icon Name="plus" />Nowa dostawa</a>
+                </EmptyState>
+            }
+            else
+            {
+                <EmptyState IconName="search" Title="Nic nie pasuje do filtrów" Text="Zmień etap albo wyczyść wyszukiwanie.">
+                    <button type="button" class="btn" @onclick="() => Go(null, null, 0)"><Icon Name="x" />Wyczyść filtry</button>
+                </EmptyState>
+            }
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th>Dostawa</th>
+                            <th>Skąd i dokąd</th>
+                            <th>Przebieg</th>
+                            <th>Etap</th>
+                            <th class="num">Dystans</th>
+                            <th class="num">Cena</th>
+                            <th>Utworzona</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var d in _items)
+                        {
+                            var stage = DeliveryStages.From(d.Status);
+                            <tr class="clickable" @onclick="() => Navigation.NavigateTo(Detail(d))">
+                                <td><ShortId Id="d.Id" Href="@Detail(d)" /></td>
+                                <td>
+                                    <div class="addr"><Icon Name="map-pin" /><span>@d.PickupAddress</span></div>
+                                    <div class="addr"><Icon Name="flag" /><span>@d.DeliveryAddress</span></div>
+                                </td>
+                                <td><RouteLine Stage="stage" Variant="mini" /></td>
+                                <td><StagePill Stage="stage" /></td>
+                                <td class="num">@Format.Number(d.DistanceKm) km</td>
+                                <td class="num cell-main">@Format.Money(d.Price, d.Currency)</td>
+                                <td class="cell-sub">@Format.Ago(d.CreatedAt, Clock.Now, Clock.Zone)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        <Pager Page="PageIndex" HasNext="_hasNext" ItemCount="@(_items?.Count ?? 0)" Busy="_loading" PageChanged="p => Go(Stage, Search, p)" />
+    </section>
+</div>
+
+@code {
+    private const int PageSize = 25;
+
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? StatusQuery { get; set; }
+
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? Search { get; set; }
+
+    [SupplyParameterFromQuery(Name = "page")]
+    public int? PageQuery { get; set; }
+
+    private DeliveryStage? Stage => StatusQuery is null ? null : DeliveryStages.Parse(StatusQuery) is var s && s != DeliveryStage.Unknown ? s : null;
+
+    private int PageIndex => Math.Max(PageQuery ?? 0, 0);
+
+    private List<DeliveryResponse>? _items;
+    private bool _hasNext;
+    private bool _loading;
+    private string? _error;
+    private string? _searchInput;
+
+    protected override Task OnParametersSetAsync()
+    {
+        _searchInput = Search;
+        return Load();
+    }
+
+    private async Task Load()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            Guid? id = Guid.TryParse(Search, out var parsed) ? parsed : null;
+            if (Search is not null && id is null)
+            {
+                _items = [];
+                _hasNext = false;
+                _error = "Wpisz pełny identyfikator dostawy (36 znaków, np. skopiowany przyciskiem obok skrótu).";
+                return;
+            }
+
+            var slice = await Deliveries.Api.Delivery.Deliveries.GetAsync(c =>
+            {
+                c.QueryParameters.Page = PageIndex;
+                c.QueryParameters.Size = PageSize;
+                c.QueryParameters.DeliveryId = id;
+                if (Stage is { } stage)
+                    c.QueryParameters.Status = Enum.Parse<DeliveryStatusFilter>(DeliveryStages.ApiName(stage));
+            });
+            _items = slice?.Content ?? [];
+            _hasNext = slice?.HasNext == true;
+        }
+        catch (Exception ex)
+        {
+            _error = ApiErrors.Describe(ex).Message;
+            _items ??= [];
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void SubmitSearch() => Go(Stage, string.IsNullOrWhiteSpace(_searchInput) ? null : _searchInput.Trim(), 0);
+
+    private void Go(DeliveryStage? stage, string? search, int page) =>
+        Navigation.NavigateTo(
+            Navigation.GetUriWithQueryParameters(
+                new Dictionary<string, object?>
+                {
+                    ["status"] = stage is null ? null : DeliveryStages.ApiName(stage.Value),
+                    ["q"] = search,
+                    ["page"] = page == 0 ? null : page,
+                }
+            )
+        );
+
+    private static string Detail(DeliveryResponse d) => $"deliveries/{d.Id}";
+}

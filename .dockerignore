@@ -1,0 +1,59 @@
+# Gradle
+.gradle/
+**/build/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+out/
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Vim
+*.swp
+
+# Test / reports
+TestResults/
+artifacts/
+
+# Kotlin
+.kotlin
+
+# Documentation
+README*
+HELP.md
+docs/
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.docker/
+
+**/bin/
+**/obj/
+
+.vs/
+.idea/
+
+*.user
+*.suo
+*.userosscache
+*.sln.docstates

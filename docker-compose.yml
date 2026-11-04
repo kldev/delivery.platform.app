@@ -1,0 +1,295 @@
+name: delivery-platform
+services:
+  # ===================
+  # Infrastructure
+  # ===================
+  postgres:
+    image: postgres:18.6-alpine
+    shm_size: 256mb
+    container_name: platform-postgres
+    restart: unless-stopped
+    mem_limit: 768m 
+    environment:
+      POSTGRES_DB: platform
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: platform
+    networks:
+      - inner-cluster-communication       
+    command: 
+      - postgres 
+      - -c 
+      - max_connections=250
+      - -c 
+      - shared_preload_libraries=pg_stat_statements     
+    ports:
+      - "5632:5432"
+    volumes:
+      - postgres18_data:/var/lib/postgresql
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform -d platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 10          
+  broker:
+    image: apache/kafka:4.3.1
+    container_name: broker
+    mem_limit: 768m 
+    ports:
+      - 9092:9092
+    networks:
+      - inner-cluster-communication    
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT_HOST://localhost:9092,PLAINTEXT://broker:19092'
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@broker:29093'
+      KAFKA_LISTENERS: 'CONTROLLER://:29093,PLAINTEXT_HOST://:9092,PLAINTEXT://:19092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      CLUSTER_ID: '4L6g3nShT-eMCtK--X86sw'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+    healthcheck:
+      test: 
+        [
+          "CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 10s
+  kafka-ui:
+    image: 'kafbat/kafka-ui:latest'
+    networks:
+      - inner-cluster-communication
+    ports:
+      - '8080:8080'
+    mem_limit: 768m 
+    depends_on:
+      broker:
+        condition: service_healthy
+    environment:
+      DYNAMIC_CONFIG_ENABLED: 'true'
+      KAFKA_CLUSTERS_0_NAME: 'local'
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: 'broker:19092'
+  kafka-init:
+    image: apache/kafka:4.3.1
+    container_name: platform-kafka-init
+    networks:
+      - inner-cluster-communication
+    depends_on:
+      broker:
+        condition: service_healthy
+    volumes:
+      - ./infrastructure/kafka/init-topics.sh:/init-topics.sh
+    entrypoint:
+      - /bin/bash
+      - /init-topics.sh     
+
+  delivery-svc:
+    build:
+      context: .
+      dockerfile: services/delivery-service/delivery-web/Dockerfile
+    container_name: delivery
+    mem_limit: 768m
+    environment:      
+      SPRING_PROFILES_ACTIVE: docker
+      KAFKA_SERVERS: broker:19092
+      PG_HOST: postgres   
+      PORT: 8080   
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=60 -XX:InitialRAMPercentage=15"
+      RATE_LIMIT: 500
+      API_KEY: ${API_KEY:-}
+      RATE_LIMIT_ENABLE: ${RATE_LIMIT_ENABLE:-}              
+    depends_on:
+      broker:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy         
+    networks:
+      - inner-cluster-communication
+    # healthcheck comes from the image (HEALTHCHECK on /actuator/health/readiness)
+
+  settlement-svc:
+    build:
+      context:  .
+      dockerfile: services/settlement-service/settlement-web/Dockerfile
+    container_name: settlement
+    mem_limit: 768m
+    networks:
+      - inner-cluster-communication     
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      KAFKA_SERVERS: broker:19092
+      PG_HOST: postgres
+      PORT: 8080
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=60 -XX:InitialRAMPercentage=15"  
+    # healthcheck comes from the image (HEALTHCHECK on /actuator/health/readiness)
+    depends_on:
+      broker:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy         
+
+  ledger-svc:
+    build:
+      context: .
+      dockerfile: services/ledger-service/ledger-web/Dockerfile
+    container_name: ledger
+    mem_limit: 768m
+    networks:
+      - inner-cluster-communication     
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      KAFKA_SERVERS: broker:19092
+      PG_HOST: postgres
+      PORT: 8080
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=60 -XX:InitialRAMPercentage=15"
+    # healthcheck comes from the image (HEALTHCHECK on /actuator/health/readiness)         
+    depends_on:
+      broker:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy                 
+
+  reconciliation-svc:
+    build:
+      context: .
+      dockerfile: services/reconciliation-service/reconciliation-web/Dockerfile
+    container_name: reconciliation
+    mem_limit: 768m
+    networks:
+      - inner-cluster-communication     
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      KAFKA_SERVERS: broker:19092
+      PG_HOST: postgres
+      PORT: 8080
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=60"  
+    # healthcheck comes from the image (HEALTHCHECK on /actuator/health/readiness)
+    depends_on:
+      broker:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy            
+
+  payment-svc:
+    build:
+      context: ./dotnet/PaymentService
+      dockerfile: ./Dockerfile
+    container_name: payment
+    mem_limit: 768m
+    networks:
+      - inner-cluster-communication     
+    environment:
+      ASPNETCORE_ENVIRONMENT: docker
+      ConnectionStrings__Database: "Host=postgres;Port=5432;Database=paymentsdb;Username=platform;Password=platform;Maximum Pool Size=50"
+      Kafka__BootstrapServers: broker:19092
+    healthcheck:
+      test: 
+        [
+          "CMD-SHELL", "curl -fsS http://localhost:8080/healthz || exit 1"
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 10s             
+    depends_on:
+      broker:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  notification-svc:
+    build:
+      context: .
+      dockerfile: services/notification-service/notification-web/Dockerfile
+    container_name: notification
+    mem_limit: 768m
+    networks:
+      - inner-cluster-communication
+    environment:
+      KAFKA_SERVERS: broker:19092
+      PG_HOST: postgres
+      PORT: 8080
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=60"
+      DELIVERY_URL: http://delivery:8080
+      INTERVAL: 5s
+      API_KEY: ${API_KEY:-}    
+    depends_on:
+      broker:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      delivery-svc:
+        condition: service_healthy            
+
+  reporting-svc:
+    build:
+      context: reporting/reporting-service
+      dockerfile: ./Dockerfile
+    container_name: reporting
+    mem_limit: 768m
+    networks:
+      - inner-cluster-communication
+    environment:
+      KAFKA_SERVERS: broker:19092
+      PG_HOST: postgres
+      PORT: 8080
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=60"
+      DELIVERY_URL: http://delivery:8080
+      SETTLEMENT_URL: http://settlement:8080
+    depends_on:
+      broker:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      delivery-svc:
+        condition: service_healthy              
+
+  gateway:
+    build:
+      context: dotnet/Gateway
+      dockerfile: ./Dockerfile
+    container_name: gateway
+    mem_limit: 768m 
+    networks:
+      - inner-cluster-communication     
+    environment:
+      ASPNETCORE_ENVIRONMENT: Docker
+      #Logging__LogLevel__Yarp: Debug            
+    ports:
+    - "5000:8080"            
+
+  portal:
+    build:
+      context: dotnet/App.Platform.Portal
+      dockerfile: ./Dockerfile
+    container_name: portal
+    mem_limit: 512m
+    networks:
+      - inner-cluster-communication
+    environment:
+      Gateway__BaseUrl: http://gateway:8080
+      Portal__TimeZone: Europe/Warsaw
+    # healthcheck comes from the image (HEALTHCHECK on /health)
+    depends_on:
+      - gateway
+    ports:
+      - "5080:8080"
+
+networks:
+  inner-cluster-communication:
+
+volumes:
+  postgres18_data:
+  files_data:
+  kafka-data:

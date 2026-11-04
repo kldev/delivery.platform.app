@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/payment-service/">
+    <Project Path="Delivery.Platform.Domain/Delivery.Platform.Domain.csproj" />
+    <Project Path="Delivery.Platform.Infrastructure/Delivery.Platform.Infrastructure.csproj" />
+    <Project Path="Delivery.Platform.PaymentService/Delivery.Platform.PaymentService.csproj" />
+  </Folder>
+</Solution>

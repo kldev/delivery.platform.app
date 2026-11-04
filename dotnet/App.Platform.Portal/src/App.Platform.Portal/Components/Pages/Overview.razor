@@ -1,0 +1,180 @@
+@page "/"
+@using App.Platform.Portal.ApiClients.Delivery
+@using App.Platform.Portal.ApiClients.Delivery.Models
+@using App.Platform.Portal.ApiClients.Payment
+@using App.Platform.Portal.ApiClients.Reconciliation
+@using DeliveryStatusFilter = App.Platform.Portal.ApiClients.Delivery.Api.Delivery.Deliveries.GetStatusQueryParameterType
+@using ReconciliationStatusFilter = App.Platform.Portal.ApiClients.Reconciliation.Api.Reconciliation.Reconciliations.GetStatusQueryParameterType
+@inject DeliveryApi Deliveries
+@inject PaymentApi Payments
+@inject ReconciliationApi Reconciliations
+@inject PortalClock Clock
+@inject NavigationManager Navigation
+
+<PageTitle>Pulpit - Platform</PageTitle>
+
+<div class="page">
+    <PageHeader Title="Sieć dostaw" Lead="Gdzie są teraz zlecenia i co czeka na decyzję. Kliknij przystanek, żeby zobaczyć jego dostawy.">
+        <Actions>
+            <button type="button" class="btn" @onclick="Load" disabled="@_loading"><Icon Name="refresh" Class="@(_loading ? "spin" : null)" />Odśwież</button>
+            <a class="btn btn-primary" href="deliveries/new"><Icon Name="plus" />Nowa dostawa</a>
+        </Actions>
+    </PageHeader>
+
+    <ErrorNotice Message="@_error" OnRetry="Load" />
+
+    <section class="panel" aria-labelledby="network-title">
+        <div class="panel-head">
+            <h2 id="network-title">Dostawy na trasie</h2>
+            <span class="hint">Liczba zleceń na każdym etapie</span>
+        </div>
+        @if (_counts is null)
+        {
+            <Loading Lines="3" />
+        }
+        else
+        {
+            <div class="network">
+                <RouteLine Stage="DeliveryStage.Delivered" Counts="_counts" StopHref="StageHref" />
+            </div>
+            <div class="network-foot">
+                <a class="cancelled-link" href="@StageHref(DeliveryStage.Cancelled)"><Icon Name="ban" />Anulowane: @_cancelled</a>
+                <span>Liczniki do @CountCap na etap - powyżej widać „@(CountCap)+”.</span>
+            </div>
+        }
+    </section>
+
+    <div class="tiles">
+        <a class="panel tile" href="payments?status=Pending">
+            <div class="tile-icon tone-signal"><Icon Name="credit-card" /></div>
+            <div>
+                <div class="tile-value">@(_pendingPayments ?? "-")</div>
+                <div class="tile-label">płatności czeka na akceptację - bez niej dostawa nie dostanie kierowcy</div>
+            </div>
+        </a>
+        <a class="panel tile" href="reconciliations?status=DISCREPANCY">
+            <div class="tile-icon tone-stop"><Icon Name="scale" /></div>
+            <div>
+                <div class="tile-value">@(_discrepancies ?? "-")</div>
+                <div class="tile-label">rozbieżności między płatnością a rozliczeniem kierowcy</div>
+            </div>
+        </a>
+        <a class="panel tile" href="deliveries?status=IN_TRANSIT">
+            <div class="tile-icon tone-info"><Icon Name="truck" /></div>
+            <div>
+                <div class="tile-value">@(_counts?.GetValueOrDefault(DeliveryStage.InTransit) ?? "-")</div>
+                <div class="tile-label">dostaw jest teraz w drodze do odbiorców</div>
+            </div>
+        </a>
+    </div>
+
+    <section class="panel" aria-labelledby="recent-title">
+        <div class="panel-head">
+            <h2 id="recent-title">Ostatnie zlecenia</h2>
+            <a href="deliveries">Wszystkie dostawy</a>
+        </div>
+        @if (_recent is null)
+        {
+            <Loading />
+        }
+        else if (_recent.Count == 0)
+        {
+            <EmptyState IconName="package" Title="Jeszcze nie ma dostaw" Text="Utwórz pierwsze zlecenie - pojawi się tutaj i na trasie powyżej.">
+                <a class="btn btn-primary" href="deliveries/new"><Icon Name="plus" />Nowa dostawa</a>
+            </EmptyState>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="data">
+                    <thead>
+                        <tr><th>Dostawa</th><th>Trasa</th><th>Etap</th><th class="num">Cena</th><th>Utworzona</th></tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var d in _recent)
+                        {
+                            var stage = DeliveryStages.From(d.Status);
+                            <tr class="clickable" @onclick="() => Open(d.Id)">
+                                <td><ShortId Id="d.Id" Href="@($"deliveries/{d.Id}")" /></td>
+                                <td>
+                                    <div class="addr"><Icon Name="map-pin" /><span>@d.PickupAddress</span></div>
+                                    <div class="addr"><Icon Name="flag" /><span>@d.DeliveryAddress</span></div>
+                                </td>
+                                <td><StagePill Stage="stage" /></td>
+                                <td class="num">@Format.Money(d.Price, d.Currency)</td>
+                                <td class="cell-sub">@Format.Ago(d.CreatedAt, Clock.Now, Clock.Zone)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private const int CountCap = 500;
+
+    private Dictionary<DeliveryStage, string>? _counts;
+    private string? _cancelled;
+    private string? _pendingPayments;
+    private string? _discrepancies;
+    private List<DeliveryResponse>? _recent;
+    private string? _error;
+    private bool _loading;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var stages = DeliveryStages.Route.Append(DeliveryStage.Cancelled).ToList();
+            var countTasks = stages.ToDictionary(s => s, CountAt);
+            var pending = Payments.Api.Payment.Payments.GetAsync(c => c.QueryParameters.Status = App.Platform.Portal.ApiClients.Payment.Models.PaymentStatus.Pending);
+            var discrepancies = Reconciliations.Api.Reconciliation.Reconciliations.GetAsync(c =>
+            {
+                c.QueryParameters.Status = ReconciliationStatusFilter.DISCREPANCY;
+                c.QueryParameters.Size = CountCap;
+            });
+            var recent = Deliveries.Api.Delivery.Deliveries.GetAsync(c => c.QueryParameters.Size = 8);
+
+            await Task.WhenAll([.. countTasks.Values, pending, discrepancies, recent]);
+
+            _counts = DeliveryStages.Route.ToDictionary(s => s, s => countTasks[s].Result);
+            _cancelled = countTasks[DeliveryStage.Cancelled].Result;
+            _pendingPayments = (pending.Result?.Count ?? 0).ToString();
+            var d = discrepancies.Result;
+            _discrepancies = d is null ? "0" : Counted(d.Content?.Count ?? 0, d.HasNext == true);
+            _recent = recent.Result?.Content ?? [];
+        }
+        catch (Exception ex)
+        {
+            _error = ApiErrors.Describe(ex).Message;
+            _counts ??= [];
+            _recent ??= [];
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task<string> CountAt(DeliveryStage stage)
+    {
+        var slice = await Deliveries.Api.Delivery.Deliveries.GetAsync(c =>
+        {
+            c.QueryParameters.Status = Enum.Parse<DeliveryStatusFilter>(DeliveryStages.ApiName(stage));
+            c.QueryParameters.Size = CountCap;
+        });
+        return Counted(slice?.Content?.Count ?? 0, slice?.HasNext == true);
+    }
+
+    private static string Counted(int count, bool more) => more ? $"{count}+" : count.ToString();
+
+    private static string StageHref(DeliveryStage stage) => $"deliveries?status={DeliveryStages.ApiName(stage)}";
+
+    private void Open(Guid? id) => Navigation.NavigateTo($"deliveries/{id}");
+}

@@ -1,0 +1,134 @@
+@page "/payments"
+@using App.Platform.Portal.ApiClients.Payment
+@using App.Platform.Portal.ApiClients.Payment.Models
+@inject PaymentApi Payments
+@inject PortalClock Clock
+@inject Toasts Toasts
+@inject NavigationManager Navigation
+
+<PageTitle>Płatności - Platform</PageTitle>
+
+<div class="page">
+    <PageHeader Title="Płatności" Lead="Płatność powstaje, gdy zlecenie zostanie potwierdzone. Akceptacja wysyła dostawę do kierowcy, odrzucenie ją anuluje." />
+
+    <section class="panel">
+        <div class="toolbar">
+            <div class="chips" role="group" aria-label="Status płatności">
+                @foreach (var (value, label, icon) in Filters)
+                {
+                    <button type="button" class="chip @(Status == value ? "on" : "")" @onclick="() => Go(value)"><Icon Name="@icon" />@label</button>
+                }
+            </div>
+        </div>
+        <ErrorNotice Message="@_error" OnRetry="Load" />
+        @if (_items is null)
+        {
+            <Loading />
+        }
+        else if (_items.Count == 0)
+        {
+            <EmptyState IconName="credit-card" Title="@(Status == "Pending" ? "Nic nie czeka na decyzję" : "Brak płatności")"
+                        Text="@(Status == "Pending" ? "Każda potwierdzona dostawa ma już decyzję o płatności." : "Płatności pojawią się po potwierdzeniu pierwszego zlecenia.")" />
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="data">
+                    <thead><tr><th>Płatność</th><th>Dostawa</th><th>Status</th><th class="num">Kwota</th><th>Założona</th><th>Opłacona</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var p in _items)
+                        {
+                            <tr @key="p.Id">
+                                <td><ShortId Id="p.Id" /></td>
+                                <td><ShortId Id="p.DeliveryId" Href="@($"deliveries/{p.DeliveryId}")" /></td>
+                                <td><PaymentPill Status="@p.Status" /></td>
+                                <td class="num cell-main">@Format.Money(p.Amount, p.Currency)</td>
+                                <td class="cell-sub">@Format.Ago(p.CreatedAt, Clock.Now, Clock.Zone)</td>
+                                <td class="cell-sub">@(p.PaidAt is null ? "-" : Format.DateTime(p.PaidAt, Clock.Zone))</td>
+                                <td class="num">
+                                    @if (p.Status == "Pending" && p.Id is { } id)
+                                    {
+                                        <div class="head-actions" style="justify-content: flex-end">
+                                            <button type="button" class="btn btn-sm btn-primary" disabled="@(_busy.ContainsKey(id))" @onclick='() => Decide(id, "accept")'>
+                                                <Icon Name="@(Busy(id, "accept") ? "loader" : "check")" Class="@(Busy(id, "accept") ? "spin" : null)" />Akceptuj
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-danger" disabled="@(_busy.ContainsKey(id))" @onclick='() => Decide(id, "decline")'>
+                                                <Icon Name="@(Busy(id, "decline") ? "loader" : "x")" Class="@(Busy(id, "decline") ? "spin" : null)" />Odrzuć
+                                            </button>
+                                        </div>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private static readonly (string? Value, string Label, string Icon)[] Filters =
+    [
+        ("Pending", "Czekają na decyzję", "hourglass"),
+        ("Paid", "Opłacone", "circle-check"),
+        ("Failed", "Odrzucone", "circle-x"),
+        (null, "Wszystkie", "credit-card"),
+    ];
+
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? StatusQuery { get; set; }
+
+    private string? Status => StatusQuery is "Pending" or "Paid" or "Failed" ? StatusQuery : StatusQuery is "all" ? null : StatusQuery is null ? "Pending" : null;
+
+    private List<PaymentItemResponse>? _items;
+    private string? _error;
+    private readonly Dictionary<Guid, string> _busy = [];
+
+    protected override Task OnParametersSetAsync() => Load();
+
+    private bool Busy(Guid id, string decision) => _busy.TryGetValue(id, out var d) && d == decision;
+
+    private async Task Load()
+    {
+        _error = null;
+        try
+        {
+            var status = Status;
+            var list = await Payments.Api.Payment.Payments.GetAsync(c =>
+            {
+                if (status is not null)
+                    c.QueryParameters.Status = Enum.Parse<PaymentStatus>(status);
+            });
+            _items = list?.OrderByDescending(p => p.CreatedAt).ToList() ?? [];
+        }
+        catch (Exception ex)
+        {
+            _error = ApiErrors.Describe(ex).Message;
+            _items ??= [];
+        }
+    }
+
+    private async Task Decide(Guid id, string decision)
+    {
+        _busy[id] = decision;
+        try
+        {
+            await Payments.Api.Payment.Payments[id][decision].PutAsync();
+            Toasts.Success(decision == "accept" ? "Płatność zaakceptowana" : "Płatność odrzucona",
+                decision == "accept" ? "Serwis dostaw przydzieli kierowcę." : "Serwis dostaw anuluje dostawę.");
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            Toasts.Error("Nie udało się zapisać decyzji", ApiErrors.Describe(ex).Message);
+        }
+        finally
+        {
+            _busy.Remove(id);
+        }
+    }
+
+    private void Go(string? status) =>
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("status", status ?? "all"));
+}

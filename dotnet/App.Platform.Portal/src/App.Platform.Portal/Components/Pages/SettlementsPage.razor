@@ -1,0 +1,136 @@
+@page "/settlements"
+@using App.Platform.Portal.ApiClients.Settlement
+@using App.Platform.Portal.ApiClients.Settlement.Models
+@inject SettlementApi Settlements
+@inject PortalClock Clock
+@inject NavigationManager Navigation
+
+<PageTitle>Rozliczenia - Platform</PageTitle>
+
+<div class="page">
+    <PageHeader Title="Rozliczenia kierowców" Lead="Po doręczeniu serwis rozliczeń dzieli cenę dostawy: część bazowa i dodatki za noc, weekend i dystans trafiają do kierowcy." />
+
+    <section class="panel">
+        <div class="toolbar">
+            @if (DriverId is not null || DeliveryId is not null)
+            {
+                <span class="pill tone-info"><Icon Name="search" />@(DriverId is not null ? $"Kierowca {Format.ShortId(DriverId)}" : $"Dostawa {Format.ShortId(DeliveryId)}")</span>
+                <button type="button" class="btn btn-sm btn-ghost" @onclick="() => Go(null, 0, clear: true)"><Icon Name="x" />Pokaż wszystkie</button>
+            }
+            <div class="legend">
+                <span><i style="background: var(--route)"></i>bazowa</span>
+                <span><i style="background: var(--asphalt-3)"></i>noc</span>
+                <span><i style="background: var(--signal)"></i>weekend</span>
+                <span><i style="background: var(--info)"></i>dystans</span>
+                <span><i style="background: #edf1f4; border: 1px solid var(--line-strong)"></i>platforma</span>
+            </div>
+            <form class="search" @onsubmit="() => Go(_searchInput, 0)">
+                <Icon Name="search" />
+                <input type="search" placeholder="Szukaj kierowcy" @bind="_searchInput" aria-label="Szukaj" />
+            </form>
+        </div>
+        <ErrorNotice Message="@_error" OnRetry="Load" />
+        @if (_items is null)
+        {
+            <Loading />
+        }
+        else if (_items.Count == 0)
+        {
+            <EmptyState IconName="hand-coins" Title="Brak rozliczeń" Text="Rozliczenie powstaje po doręczeniu dostawy." />
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="data">
+                    <thead><tr><th>Kierowca</th><th>Dostawa</th><th>Podział</th><th class="num">Stawka</th><th class="num">Cena dostawy</th><th class="num">Dla kierowcy</th><th>Doręczona</th></tr></thead>
+                    <tbody>
+                        @foreach (var s in _items)
+                        {
+                            <tr @key="s.Id">
+                                <td><div class="cell-main">@s.DriverFullName</div><div class="cell-sub">@Format.Number(s.DistanceKm) km</div></td>
+                                <td><ShortId Id="s.DeliveryId" Href="@($"deliveries/{s.DeliveryId}")" /></td>
+                                <td>
+                                    <div class="split" title="bazowa @Format.Percent(s.BasePercentage), noc @Format.Percent(s.NightPercentage), weekend @Format.Percent(s.WeekendPercentage), dystans @Format.Percent(s.DistancePercentage)">
+                                        <span class="base" style="width:@Share(s, s.BasePercentage)"></span>
+                                        <span class="night" style="width:@Share(s, s.NightPercentage)"></span>
+                                        <span class="weekend" style="width:@Share(s, s.WeekendPercentage)"></span>
+                                        <span class="distance" style="width:@Share(s, s.DistancePercentage)"></span>
+                                    </div>
+                                </td>
+                                <td class="num">@Format.Percent(s.TotalPercentage)</td>
+                                <td class="num">@Format.Money(s.DeliveryAmount, s.Currency)</td>
+                                <td class="num cell-main">@Format.Money(s.DriverAmount, s.Currency)</td>
+                                <td class="cell-sub">@Format.DateTime(s.CompletedAt, Clock.Zone)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        <Pager Page="PageIndex" HasNext="_hasNext" ItemCount="@(_items?.Count ?? 0)" PageChanged="p => Go(Search, p)" />
+    </section>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "q")]
+    public string? Search { get; set; }
+
+    [SupplyParameterFromQuery(Name = "driverId")]
+    public Guid? DriverId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "deliveryId")]
+    public Guid? DeliveryId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "page")]
+    public int? PageQuery { get; set; }
+
+    private int PageIndex => Math.Max(PageQuery ?? 0, 0);
+
+    private List<SettlementResponse>? _items;
+    private bool _hasNext;
+    private string? _error;
+    private string? _searchInput;
+
+    protected override Task OnParametersSetAsync()
+    {
+        _searchInput = Search;
+        return Load();
+    }
+
+    private async Task Load()
+    {
+        _error = null;
+        try
+        {
+            var slice = await Settlements.Api.Settlement.Settlements.GetAsync(c =>
+            {
+                c.QueryParameters.Search = Search;
+                c.QueryParameters.DriverId = DriverId;
+                c.QueryParameters.DeliveryId = DeliveryId;
+                c.QueryParameters.Page = PageIndex;
+                c.QueryParameters.Size = 25;
+            });
+            _items = slice?.Content ?? [];
+            _hasNext = slice?.HasNext == true;
+        }
+        catch (Exception ex)
+        {
+            _error = ApiErrors.Describe(ex).Message;
+            _items ??= [];
+        }
+    }
+
+    // Each part is a percentage of the delivery's price: the filled bar is the driver's share, the rest stays with
+    // the platform.
+    private static string Share(SettlementResponse s, double? part) =>
+        Math.Clamp(part ?? 0, 0, 100).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+    private void Go(string? search, int page, bool clear = false) =>
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameters(new Dictionary<string, object?>
+        {
+            ["q"] = string.IsNullOrWhiteSpace(search) ? null : search.Trim(),
+            ["page"] = page == 0 ? null : page,
+            ["driverId"] = clear ? null : DriverId,
+            ["deliveryId"] = clear ? null : DeliveryId,
+        }));
+}

@@ -1,0 +1,19 @@
+<span class="pill @(string.IsNullOrEmpty(Tone) ? "" : "tone-" + Tone)">
+    @if (IconName is not null)
+    {
+        <Icon Name="@IconName" />
+    }
+    @Text
+</span>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Text { get; set; } = "";
+
+    /// <summary>route, signal, stop, info or empty (neutral).</summary>
+    [Parameter]
+    public string? Tone { get; set; }
+
+    [Parameter]
+    public string? IconName { get; set; }
+}

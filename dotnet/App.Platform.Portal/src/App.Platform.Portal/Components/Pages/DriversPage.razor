@@ -1,0 +1,148 @@
+@page "/drivers"
+@using App.Platform.Portal.ApiClients.Delivery
+@using App.Platform.Portal.ApiClients.Delivery.Models
+@inject DeliveryApi Deliveries
+@inject Toasts Toasts
+
+<PageTitle>Kierowcy - Platform</PageTitle>
+
+<div class="page">
+    <PageHeader Title="Kierowcy" Lead="Po opłaceniu zlecenia serwis dostaw przydziela jednego z nich. Bez kierowców dostawy stoją na etapie „Potwierdzona”.">
+        <Actions>
+            <button type="button" class="btn btn-primary" @onclick="() => _formOpen = !_formOpen"><Icon Name="user-plus" />Dodaj kierowcę</button>
+        </Actions>
+    </PageHeader>
+
+    @if (_formOpen)
+    {
+        <section class="panel" aria-labelledby="new-driver">
+            <div class="panel-head"><h2 id="new-driver">Nowy kierowca</h2></div>
+            <form class="panel-body" @onsubmit="Register" novalidate>
+                <div class="form-grid">
+                    <div class="field">
+                        <label for="first">Imię</label>
+                        <input id="first" @bind="_first" class="@Invalid("firstName")" autocomplete="off" />
+                        <FieldError Message="@_failure?.Field("firstName")" />
+                    </div>
+                    <div class="field">
+                        <label for="last">Nazwisko</label>
+                        <input id="last" @bind="_last" class="@Invalid("lastName")" autocomplete="off" />
+                        <FieldError Message="@_failure?.Field("lastName")" />
+                    </div>
+                    <div class="field">
+                        <label for="phone">Telefon</label>
+                        <input id="phone" type="tel" @bind="_phone" class="@Invalid("phoneNumber")" placeholder="+48 600 100 200" />
+                        <FieldError Message="@_failure?.Field("phoneNumber")" />
+                    </div>
+                    <div class="field">
+                        <label for="email">E-mail</label>
+                        <input id="email" type="email" @bind="_email" class="@Invalid("email")" />
+                        <FieldError Message="@_failure?.Field("email")" />
+                    </div>
+                </div>
+                @if (_failure is not null && _failure.Fields.Count == 0)
+                {
+                    <div class="notice" role="alert" style="margin-top: 16px"><Icon Name="alert" /><div class="notice-text">@_failure.Message</div></div>
+                }
+                <div class="form-actions" style="margin-top: 18px">
+                    <button type="button" class="btn" @onclick="() => _formOpen = false">Zamknij</button>
+                    <button type="submit" class="btn btn-primary" disabled="@_saving">
+                        <Icon Name="@(_saving ? "loader" : "check")" Class="@(_saving ? "spin" : null)" />Zapisz kierowcę
+                    </button>
+                </div>
+            </form>
+        </section>
+    }
+
+    <section class="panel">
+        <ErrorNotice Message="@_error" OnRetry="Load" />
+        @if (_drivers is null)
+        {
+            <Loading />
+        }
+        else if (_drivers.Count == 0)
+        {
+            <EmptyState IconName="users" Title="Nie ma jeszcze kierowców" Text="Dodaj pierwszego - bez niego żadna dostawa nie ruszy dalej niż do potwierdzenia.">
+                <button type="button" class="btn btn-primary" @onclick="() => _formOpen = true"><Icon Name="user-plus" />Dodaj kierowcę</button>
+            </EmptyState>
+        }
+        else
+        {
+            <div class="table-wrap">
+                <table class="data">
+                    <thead><tr><th>Kierowca</th><th>Telefon</th><th>E-mail</th><th>Identyfikator</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var d in _drivers)
+                        {
+                            <tr @key="d.Id">
+                                <td class="cell-main">@d.FirstName @d.LastName</td>
+                                <td>@d.PhoneNumber</td>
+                                <td><a href="mailto:@d.Email">@d.Email</a></td>
+                                <td><ShortId Id="d.Id" /></td>
+                                <td class="num"><a href="settlements?driverId=@d.Id">Rozliczenia</a></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    private List<DriverResponse>? _drivers;
+    private string? _error;
+    private bool _formOpen;
+    private bool _saving;
+    private ApiFailure? _failure;
+    private string? _first;
+    private string? _last;
+    private string? _phone;
+    private string? _email;
+
+    protected override Task OnInitializedAsync() => Load();
+
+    private string? Invalid(string field) => _failure?.Field(field) is null ? null : "invalid";
+
+    private async Task Load()
+    {
+        _error = null;
+        try
+        {
+            _drivers = (await Deliveries.Api.Delivery.Drivers.GetAsync())?.OrderBy(d => d.LastName).ThenBy(d => d.FirstName).ToList() ?? [];
+        }
+        catch (Exception ex)
+        {
+            _error = ApiErrors.Describe(ex).Message;
+            _drivers ??= [];
+        }
+    }
+
+    private async Task Register()
+    {
+        _saving = true;
+        _failure = null;
+        try
+        {
+            var driver = await Deliveries.Api.Delivery.Drivers.PostAsync(new CreateDriverRequest
+            {
+                FirstName = _first?.Trim(),
+                LastName = _last?.Trim(),
+                PhoneNumber = _phone?.Trim(),
+                Email = _email?.Trim(),
+            });
+            Toasts.Success("Kierowca dodany", $"{driver?.FirstName} {driver?.LastName} może już dostawać zlecenia.");
+            _first = _last = _phone = _email = null;
+            _formOpen = false;
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _failure = ApiErrors.Describe(ex);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

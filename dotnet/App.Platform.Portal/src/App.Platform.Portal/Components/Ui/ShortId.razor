@@ -1,0 +1,38 @@
+@inject IJSRuntime Js
+@inject Toasts Toasts
+
+<span class="sid" title="@Id">
+    @if (Href is not null)
+    {
+        <a href="@Href">@Format.ShortId(Id)</a>
+    }
+    else
+    {
+        @Format.ShortId(Id)
+    }
+    @if (Id is not null)
+    {
+        <button type="button" @onclick="Copy" @onclick:stopPropagation="true" aria-label="Kopiuj pełny identyfikator"><Icon Name="copy" /></button>
+    }
+</span>
+
+@code {
+    [Parameter, EditorRequired]
+    public Guid? Id { get; set; }
+
+    [Parameter]
+    public string? Href { get; set; }
+
+    private async Task Copy()
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", Id.ToString());
+            Toasts.Success("Skopiowano identyfikator", Id.ToString());
+        }
+        catch (JSException)
+        {
+            Toasts.Error("Nie udało się skopiować", "Przeglądarka nie pozwala na dostęp do schowka.");
+        }
+    }
+}

@@ -1,0 +1,63 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject NavigationManager Navigation
+
+<div class="shell @(_navOpen ? "nav-open" : "")">
+    <aside class="rail" aria-label="Nawigacja">
+        <a class="brand" href="">
+            <span class="brand-mark"><Icon Name="route" /></span>
+            <span>
+                <span class="brand-name">Platform</span><br />
+                <span class="brand-sub">Portal operacyjny</span>
+            </span>
+        </a>
+        <nav class="nav">
+            <NavLink href="" Match="NavLinkMatch.All"><Icon Name="layout-dashboard" />Pulpit</NavLink>
+            <div class="nav-group">Dostawy</div>
+            <NavLink href="deliveries"><Icon Name="truck" />Dostawy</NavLink>
+            <NavLink href="drivers"><Icon Name="users" />Kierowcy</NavLink>
+            <div class="nav-group">Pieniądze</div>
+            <NavLink href="payments"><Icon Name="credit-card" />Płatności</NavLink>
+            <NavLink href="settlements"><Icon Name="hand-coins" />Rozliczenia</NavLink>
+            <NavLink href="ledger"><Icon Name="book-open" />Księga</NavLink>
+            <NavLink href="reconciliations"><Icon Name="scale" />Uzgodnienia</NavLink>
+            <div class="nav-group">Komunikacja</div>
+            <NavLink href="notifications"><Icon Name="bell" />Powiadomienia</NavLink>
+        </nav>
+        <div class="rail-foot">Wszystkie dane przez bramę API.</div>
+    </aside>
+
+    <div>
+        <div class="topbar">
+            <button type="button" @onclick="() => _navOpen = !_navOpen" aria-label="Menu"><Icon Name="menu" /></button>
+            <strong>Platform</strong>
+        </div>
+        <main class="main">
+            @Body
+        </main>
+    </div>
+</div>
+
+<ToastHost />
+
+<div id="blazor-error-ui" data-nosnippet>
+    Wystąpił nieoczekiwany błąd.
+    <a href="." class="reload">Odśwież</a>
+    <span class="dismiss">✕</span>
+</div>
+
+@code {
+    private bool _navOpen;
+
+    protected override void OnInitialized() => Navigation.LocationChanged += CloseNav;
+
+    private void CloseNav(object? sender, LocationChangedEventArgs e)
+    {
+        if (!_navOpen)
+            return;
+        _navOpen = false;
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => Navigation.LocationChanged -= CloseNav;
+}

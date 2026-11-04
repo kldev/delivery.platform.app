@@ -1,0 +1,102 @@
+name: delivery-platform
+services:
+  # ===================
+  # Infrastructure
+  # ===================
+  postgres:
+    image: postgres:18.6-alpine
+    shm_size: 256mb
+    container_name: platform-postgres
+    restart: unless-stopped
+    mem_limit: 768m 
+    environment:
+      POSTGRES_DB: platform
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: platform
+    networks:
+      - inner-cluster-communication       
+    command: 
+      - postgres 
+      - -c 
+      - max_connections=250
+      - -c 
+      - shared_preload_libraries=pg_stat_statements     
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres18_data:/var/lib/postgresql
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform -d platform"]
+      interval: 5s
+      timeout: 5s
+      retries: 10          
+  broker:
+    image: apache/kafka:4.3.1
+    container_name: broker
+    mem_limit: 768m 
+    ports:
+      - 9092:9092
+    networks:
+      - inner-cluster-communication    
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT_HOST://localhost:9092,PLAINTEXT://broker:19092'
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@broker:29093'
+      KAFKA_LISTENERS: 'CONTROLLER://:29093,PLAINTEXT_HOST://:9092,PLAINTEXT://:19092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      CLUSTER_ID: '4L6g3nShT-eMCtK--X86sw'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+    healthcheck:
+      test: 
+        [
+          "CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 10s
+  kafka-ui:
+    image: 'kafbat/kafka-ui:latest'
+    networks:
+      - inner-cluster-communication
+    ports:
+      - '8080:8080'
+    mem_limit: 768m 
+    depends_on:
+      broker:
+        condition: service_healthy
+    environment:
+      DYNAMIC_CONFIG_ENABLED: 'true'
+      KAFKA_CLUSTERS_0_NAME: 'local'
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: 'broker:19092'
+  kafka-init:
+    image: apache/kafka:4.3.1
+    container_name: platform-kafka-init
+    networks:
+      - inner-cluster-communication
+    depends_on:
+      broker:
+        condition: service_healthy
+    volumes:
+      - ./infrastructure/kafka/init-topics.sh:/init-topics.sh
+    entrypoint:
+      - /bin/bash
+      - /init-topics.sh     
+networks:
+  inner-cluster-communication:
+
+volumes:
+  postgres18_data:
+  files_data:
+  kafka-data:
